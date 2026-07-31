@@ -20,7 +20,8 @@ class TelegramSender:
         )
 
         print("Telegram:", response.status_code)
-        print(response.text)
+        print("Telegram:", response.status_code)
+print("Telegram Response:", response.text)
 
 
 sender = TelegramSender(BOT_TOKEN, CHAT_ID)
