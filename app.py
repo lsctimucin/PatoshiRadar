@@ -12,9 +12,9 @@ def new_token(data):
     # Aranacak kelimeler
     keywords = [
         "patoshi",
-        "satoshi",
-        "bitcoin",
-        "btc"
+        "PATOSHI",
+        "PAT",
+        "PATO"
     ]
 
     text = f"{name} {symbol}".lower()
