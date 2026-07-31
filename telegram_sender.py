@@ -20,7 +20,6 @@ class TelegramSender:
         )
 
         print("Telegram:", response.status_code)
-        print("Telegram:", response.status_code)
 print("Telegram Response:", response.text)
 
 
