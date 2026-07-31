@@ -9,8 +9,7 @@ def new_token(data):
     mint = data.get("mint", "")
     market_cap = data.get("marketCapSol", 0)
 
-    message = f"""
-🚀 Yeni Coin Bulundu!
+    message = f"""🚀 Yeni Coin!
 
 📛 İsim: {name}
 💎 Sembol: {symbol}
