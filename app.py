@@ -9,17 +9,24 @@ def new_token(data):
     mint = data.get("mint", "")
     market_cap = data.get("marketCapSol", 0)
 
-    # Sadece "patoshi" geçen coinleri gönder
-    search = "patoshi"
+    # Aranacak kelimeler
+    keywords = [
+        "patoshi",
+        "satoshi",
+        "bitcoin",
+        "btc"
+    ]
 
-    if search not in name.lower() and search not in symbol.lower():
+    text = f"{name} {symbol}".lower()
+
+    if not any(keyword in text for keyword in keywords):
         return
 
     message = f"""🚀 Yeni Coin!
 
 📛 İsim: {name}
 💎 Sembol: {symbol}
-💰 Market Cap: {market_cap} SOL
+💰 Market Cap: {market_cap:.2f} SOL
 
 https://pump.fun/{mint}
 """
