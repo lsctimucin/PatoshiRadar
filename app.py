@@ -1,8 +1,18 @@
-from config import BOT_TOKEN, CHAT_ID
-from telegram_sender import TelegramSender
+from pump_monitor import PumpMonitor
 
-print("Patoshi Radar Başlıyor...")
 
-bot = TelegramSender(BOT_TOKEN, CHAT_ID)
+def new_token(data):
 
-bot.send("🚀 Patoshi Radar Railway üzerinde çalışıyor.")
+    print("===================================")
+    print(data)
+    print("===================================")
+
+
+monitor = PumpMonitor(new_token)
+
+monitor.start()
+
+print("Patoshi Radar çalışıyor...")
+
+while True:
+    pass
