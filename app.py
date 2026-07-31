@@ -25,7 +25,6 @@ https://pump.fun/{mint}
 """
 
     print(message)
-
     send_message(message)
 
 
