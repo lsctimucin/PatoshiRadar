@@ -2,4 +2,4 @@ import os
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-PUMPPORTAL_API_KEY = os.getenv("a146gha6e5864n2g612p2au5b9pq0raaf0nqcv3qb93kgd3c60rqmmbk85wqeru8b5k6uw2de5830ykcc9h6ppa2ahj6cpku8wt50kj18tk5gv296djm4j296nx6cpjhen0myh3hcwyku69r36x1ka993gnah8wt4av32dr8h1kem356x73ewku6tq3cx1r61h4rj9fdh0kuf8")
+PUMPPORTAL_API_KEY = os.getenv("PUMPPORTAL_API_KEY")
