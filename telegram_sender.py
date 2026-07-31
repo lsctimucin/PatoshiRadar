@@ -10,7 +10,7 @@ class TelegramSender:
 
     def send(self, text):
 
-        requests.post(
+        response = requests.post(
             f"https://api.telegram.org/bot{self.token}/sendMessage",
             json={
                 "chat_id": self.chat_id,
@@ -18,6 +18,9 @@ class TelegramSender:
             },
             timeout=10
         )
+
+        print("Telegram:", response.status_code)
+        print(response.text)
 
 
 sender = TelegramSender(BOT_TOKEN, CHAT_ID)
