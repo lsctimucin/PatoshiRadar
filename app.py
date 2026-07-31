@@ -8,7 +8,11 @@ def new_token(data):
     symbol = data.get("symbol", "-")
     mint = data.get("mint", "")
     market_cap = data.get("marketCapSol", 0)
+# Sadece "patoshi" geçen coinleri gönder
+search = "patoshi"
 
+if search not in name.lower() and search not in symbol.lower():
+    return
     message = f"""🚀 Yeni Coin!
 
 📛 İsim: {name}
