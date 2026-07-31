@@ -1,0 +1,1 @@
+print("Patoshi Radar Başlatılıyor...")
