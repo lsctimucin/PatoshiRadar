@@ -1,4 +1,6 @@
 import requests
+from config import BOT_TOKEN, CHAT_ID
+
 
 class TelegramSender:
 
@@ -16,3 +18,10 @@ class TelegramSender:
             },
             timeout=10
         )
+
+
+sender = TelegramSender(BOT_TOKEN, CHAT_ID)
+
+
+def send_message(text):
+    sender.send(text)
