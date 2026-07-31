@@ -1,0 +1,85 @@
+import json
+import threading
+import time
+
+from websocket import WebSocketApp
+
+
+class PumpMonitor:
+
+    def __init__(self, callback):
+        self.callback = callback
+        self.ws = None
+        self.running = False
+
+    def on_open(self, ws):
+        print("PumpPortal bağlantısı başarılı.")
+
+        payload = {
+            "method": "subscribeNewToken"
+        }
+
+        ws.send(json.dumps(payload))
+
+        print("Yeni coin aboneliği gönderildi.")
+
+    def on_message(self, ws, message):
+
+        try:
+
+            data = json.loads(message)
+
+            self.callback(data)
+
+        except Exception as e:
+
+            print("JSON Hatası")
+
+            print(e)
+
+    def on_error(self, ws, error):
+
+        print("WebSocket Hatası")
+
+        print(error)
+
+    def on_close(self, ws, close_status_code, close_msg):
+
+        print("Bağlantı kapandı.")
+
+        if self.running:
+
+            time.sleep(5)
+
+            self.start()
+
+    def start(self):
+
+        self.running = True
+
+        self.ws = WebSocketApp(
+
+            "wss://pumpportal.fun/api/data",
+
+            on_open=self.on_open,
+
+            on_message=self.on_message,
+
+            on_error=self.on_error,
+
+            on_close=self.on_close
+
+        )
+
+        threading.Thread(
+            target=self.ws.run_forever,
+            daemon=True
+        ).start()
+
+    def stop(self):
+
+        self.running = False
+
+        if self.ws:
+
+            self.ws.close()
