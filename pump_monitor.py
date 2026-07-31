@@ -3,7 +3,7 @@ import threading
 import time
 
 from websocket import WebSocketApp
-
+from config import PUMPPORTAL_API_KEY
 
 class PumpMonitor:
 
@@ -59,7 +59,7 @@ class PumpMonitor:
 
         self.ws = WebSocketApp(
 
-            "wss://pumpportal.fun/api/data",
+            f"wss://pumpportal.fun/api/data?api-key={PUMPPORTAL_API_KEY}",
 
             on_open=self.on_open,
 
