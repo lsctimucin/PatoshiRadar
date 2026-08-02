@@ -14,7 +14,6 @@ def new_token(data):
         "patoshi",
         "pat",
         "turan",
-        "pa",
         "pato",
         "patos",
         "enes",
