@@ -14,8 +14,9 @@ def new_token(data):
         "patoshi",
         "PATOSHI",
         "PAT",
-        "PATO"
-        "A"
+        "PATO",
+        "A",
+        "a"
     ]
 
     text = f"{name} {symbol}".lower()
