@@ -13,7 +13,17 @@ def new_token(data):
     keywords = [
         "patoshi",
         "pat",
-        "a"
+        "a",
+        "pa",
+        "pato",
+        "patos",
+        "enes",
+        "parad",
+        "paradot",
+        "paradotor"
+        "patosh",
+        "meme",
+        "patoshimeme"
     ]
 
     text = f"{name} {symbol}".lower()
