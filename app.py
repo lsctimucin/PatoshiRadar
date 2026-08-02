@@ -21,8 +21,6 @@ def new_token(data):
         "paradot",
         "paradotor"
         "patosh",
-        "meme",
-        "patoshimeme"
     ]
 
     text = f"{name} {symbol}".lower()
