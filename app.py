@@ -13,7 +13,7 @@ def new_token(data):
     keywords = [
         "patoshi",
         "pat",
-        "a",
+        "turan",
         "pa",
         "pato",
         "patos",
