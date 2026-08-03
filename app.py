@@ -19,7 +19,7 @@ def new_token(data):
         "enes",
         "parad",
         "paradot",
-        "paradotor"
+        "paradotor",
         "patosh",
     ]
 
