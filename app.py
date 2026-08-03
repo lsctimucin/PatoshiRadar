@@ -14,43 +14,29 @@ def new_token(data):
         print(f"⏩ Daha önce bildirildi: {mint}")
         return
 
-    # 1. Creator kontrolü
-    if creator_match(creator):
-        message = build_message(
-            name=name,
-            symbol=symbol,
-            market_cap=market_cap,
-            mint=mint,
-            creator=creator,
-            reason="🎯 Creator Match"
-        )
+    # Filtreler
+    creator_name = creator_match(creator)
+    keyword = keyword_match(name, symbol)
 
-        print(message)
-        send_message(message)
-
-        mark_sent(
-            mint,
-            name,
-            symbol,
-            creator
-        )
-
+    # Hiçbir eşleşme yoksa çık
+    if not creator_name and not keyword:
         return
 
-    # 2. Keyword kontrolü
-    if keyword_match(name, symbol):
-        message = build_message(
-            name=name,
-            symbol=symbol,
-            market_cap=market_cap,
-            mint=mint,
-            creator=creator,
-            reason="🔍 Keyword Match"
-        )
+    # Tek mesaj oluştur
+    message = build_message(
+        name=name,
+        symbol=symbol,
+        market_cap=market_cap,
+        mint=mint,
+        creator=creator,
+        creator_name=creator_name,
+        keyword=keyword,
+    )
 
-        print(message)
-        send_message(message)
+    print(message)
 
+    # Telegram başarılıysa kaydet
+    if send_message(message):
         mark_sent(
             mint,
             name,
