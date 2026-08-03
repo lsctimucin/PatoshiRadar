@@ -1,48 +1,54 @@
 import json
+
 from pump_monitor import PumpMonitor
 from telegram_sender import send_message
 
+from filters import keyword_match, creator_match
+from notifier import build_message
+
 
 def new_token(data):
+
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
     creator = data.get("traderPublicKey", "")
-print(f"CREATOR => {creator}")
+    print(f"CREATOR => {creator}")
+
     name = data.get("name", "Bilinmiyor")
     symbol = data.get("symbol", "-")
     mint = data.get("mint", "")
     market_cap = data.get("marketCapSol", 0)
 
-    # Aranacak kelimeler
-    keywords = [
-        "patoshi",
-        "pat",
-        "turan",
-        "pato",
-        "patos",
-        "enes",
-        "parad",
-        "paradot",
-        "paradotor",
-        "patosh",
-    ]
+    # Önce creator kontrolü
+    if creator_match(creator):
 
-    text = f"{name} {symbol}".lower()
+        message = build_message(
+            name=name,
+            symbol=symbol,
+            market_cap=market_cap,
+            mint=mint,
+            creator=creator,
+            reason="🎯 Creator Match"
+        )
 
-    if not any(keyword in text for keyword in keywords):
+        print(message)
+        send_message(message)
         return
 
-    message = f"""🚀 Yeni Coin!
+    # Sonra keyword kontrolü
+    if keyword_match(name, symbol):
 
-📛 İsim: {name}
-💎 Sembol: {symbol}
-💰 Market Cap: {market_cap:.2f} SOL
+        message = build_message(
+            name=name,
+            symbol=symbol,
+            market_cap=market_cap,
+            mint=mint,
+            creator=creator,
+            reason="🔍 Keyword Match"
+        )
 
-https://pump.fun/{mint}
-"""
-
-    print(message)
-    send_message(message)
+        print(message)
+        send_message(message)
 
 
 monitor = PumpMonitor(new_token)
