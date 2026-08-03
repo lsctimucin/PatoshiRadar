@@ -8,7 +8,6 @@ from notifier import build_message
 
 
 def new_token(data):
-    # Ham veriyi logla
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
     creator = data.get("traderPublicKey", "")
@@ -19,7 +18,7 @@ def new_token(data):
     mint = data.get("mint", "")
     market_cap = data.get("marketCapSol", 0)
 
-    # Öncelik: Creator eşleşmesi
+    # 1. Creator kontrolü
     if creator_match(creator):
         message = build_message(
             name=name,
@@ -27,14 +26,14 @@ def new_token(data):
             market_cap=market_cap,
             mint=mint,
             creator=creator,
-            reason="🎯 Creator Match",
+            reason="🎯 Creator Match"
         )
 
         print(message)
         send_message(message)
         return
 
-    # Sonra: Keyword eşleşmesi
+    # 2. Keyword kontrolü
     if keyword_match(name, symbol):
         message = build_message(
             name=name,
@@ -42,7 +41,7 @@ def new_token(data):
             market_cap=market_cap,
             mint=mint,
             creator=creator,
-            reason="🔍 Keyword Match",
+            reason="🔍 Keyword Match"
         )
 
         print(message)
