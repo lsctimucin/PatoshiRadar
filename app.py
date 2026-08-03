@@ -8,6 +8,7 @@ from notifier import build_message
 
 
 def new_token(data):
+    # Ham veriyi logla
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
     creator = data.get("traderPublicKey", "")
@@ -18,7 +19,7 @@ def new_token(data):
     mint = data.get("mint", "")
     market_cap = data.get("marketCapSol", 0)
 
-    # Önce creator kontrolü
+    # Öncelik: Creator eşleşmesi
     if creator_match(creator):
         message = build_message(
             name=name,
@@ -33,7 +34,7 @@ def new_token(data):
         send_message(message)
         return
 
-    # Sonra keyword kontrolü
+    # Sonra: Keyword eşleşmesi
     if keyword_match(name, symbol):
         message = build_message(
             name=name,
@@ -50,9 +51,9 @@ def new_token(data):
 
 monitor = PumpMonitor(new_token)
 
-monitor.start()
+print("🚀 Patoshi Radar başlatılıyor...")
 
-print("Patoshi Radar çalışıyor...")
+monitor.start()
 
 while True:
     pass
