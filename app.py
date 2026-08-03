@@ -1,14 +1,3 @@
-from database import initialize_database
-from cache import already_sent, mark_sent
-import json
-
-from pump_monitor import PumpMonitor
-from telegram_sender import send_message
-
-from filters import keyword_match, creator_match
-from notifier import build_message
-
-
 def new_token(data):
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
@@ -19,6 +8,11 @@ def new_token(data):
     symbol = data.get("symbol", "-")
     mint = data.get("mint", "")
     market_cap = data.get("marketCapSol", 0)
+
+    # Aynı mint daha önce gönderildiyse çık
+    if already_sent(mint):
+        print(f"⏩ Daha önce bildirildi: {mint}")
+        return
 
     # 1. Creator kontrolü
     if creator_match(creator):
@@ -33,6 +27,14 @@ def new_token(data):
 
         print(message)
         send_message(message)
+
+        mark_sent(
+            mint,
+            name,
+            symbol,
+            creator
+        )
+
         return
 
     # 2. Keyword kontrolü
@@ -49,14 +51,9 @@ def new_token(data):
         print(message)
         send_message(message)
 
-
-initialize_database()
-
-monitor = PumpMonitor(new_token)
-
-print("🚀 Patoshi Radar başlatılıyor...")
-
-monitor.start()
-
-while True:
-    pass
+        mark_sent(
+            mint,
+            name,
+            symbol,
+            creator
+        )
