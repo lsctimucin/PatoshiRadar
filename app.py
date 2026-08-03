@@ -12,7 +12,7 @@ def new_token(data):
     # Aranacak kelimeler
     keywords = [
         "patoshi",
-        "a",
+        "pat",
         "turan",
         "pato",
         "patos",
