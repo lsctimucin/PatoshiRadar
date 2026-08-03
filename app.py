@@ -8,7 +8,6 @@ from notifier import build_message
 
 
 def new_token(data):
-
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
     creator = data.get("traderPublicKey", "")
@@ -21,14 +20,13 @@ def new_token(data):
 
     # Önce creator kontrolü
     if creator_match(creator):
-
         message = build_message(
             name=name,
             symbol=symbol,
             market_cap=market_cap,
             mint=mint,
             creator=creator,
-            reason="🎯 Creator Match"
+            reason="🎯 Creator Match",
         )
 
         print(message)
@@ -37,14 +35,13 @@ def new_token(data):
 
     # Sonra keyword kontrolü
     if keyword_match(name, symbol):
-
         message = build_message(
             name=name,
             symbol=symbol,
             market_cap=market_cap,
             mint=mint,
             creator=creator,
-            reason="🔍 Keyword Match"
+            reason="🔍 Keyword Match",
         )
 
         print(message)
