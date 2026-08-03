@@ -50,6 +50,8 @@ def new_token(data):
         send_message(message)
 
 
+initialize_database()
+
 monitor = PumpMonitor(new_token)
 
 print("🚀 Patoshi Radar başlatılıyor...")
