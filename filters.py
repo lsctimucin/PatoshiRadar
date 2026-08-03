@@ -16,10 +16,21 @@ KEYWORDS = [
 
 
 def keyword_match(name, symbol):
+
     text = f"{name} {symbol}".lower()
 
-    return any(keyword in text for keyword in KEYWORDS)
+    for keyword in KEYWORDS:
+        if keyword in text:
+            return keyword
+
+    return None
 
 
 def creator_match(creator):
-    return creator in TARGET_CREATORS
+
+    for creator_name, wallet in TARGET_CREATORS.items():
+
+        if creator == wallet:
+            return creator_name
+
+    return None
