@@ -6,6 +6,8 @@ from telegram_sender import send_message
 def new_token(data):
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
+    creator = data.get("traderPublicKey", "")
+print(f"CREATOR => {creator}")
     name = data.get("name", "Bilinmiyor")
     symbol = data.get("symbol", "-")
     mint = data.get("mint", "")
