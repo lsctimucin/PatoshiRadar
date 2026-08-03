@@ -1,8 +1,10 @@
+import json
 from pump_monitor import PumpMonitor
 from telegram_sender import send_message
 
 
 def new_token(data):
+    print(json.dumps(data, indent=2, ensure_ascii=False))
 
     name = data.get("name", "Bilinmiyor")
     symbol = data.get("symbol", "-")
