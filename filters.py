@@ -3,7 +3,6 @@ from creator_1 import TARGET_CREATORS
 
 KEYWORDS = [
     "patoshi",
-    "pat",
     "turan",
     "pato",
     "patos",
