@@ -6,7 +6,6 @@ KEYWORDS = [
     "turan",
     "pato",
     "patos",
-    "enes",
     "parad",
     "paradot",
     "paradotor",
