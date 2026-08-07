@@ -11,7 +11,8 @@ KEYWORDS = [
     "paradotor",
     "patosh",
     "patoshimeme",
-    "a"
+    "a",
+    "$pats"
 ]
 
 
