@@ -1,3 +1,6 @@
+from datetime import datetime
+
+
 def build_message(
     name,
     symbol,
@@ -11,37 +14,43 @@ def build_message(
     reasons = []
 
     if creator_name:
-        reasons.append(
-            f"🎯 Creator Match\n{creator_name}"
-        )
+        reasons.append(f"🎯 Creator Match\n{creator_name}")
 
     if keyword:
-        reasons.append(
-            f"🔍 Keyword Match\n{keyword}"
-        )
+        reasons.append(f"🔍 Keyword Match\n{keyword}")
+
+    if not reasons:
+        reasons.append("❓ Bilinmeyen Eşleşme")
 
     reason_text = "\n\n".join(reasons)
 
-    return f"""🚀 Yeni Coin!
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    return f"""🚀 <b>PATOSHI RADAR</b>
 
 {reason_text}
 
 ━━━━━━━━━━━━━━
 
-📛 İsim
+📛 <b>İsim</b>
 {name}
 
-💎 Sembol
+💎 <b>Sembol</b>
 {symbol}
 
-💰 Market Cap
+💰 <b>Market Cap</b>
 {market_cap:.2f} SOL
+
+👤 <b>Creator</b>
+<code>{creator}</code>
+
+🪙 <b>Mint</b>
+<code>{mint}</code>
+
+⏰ <b>Tespit</b>
+{now}
 
 ━━━━━━━━━━━━━━
 
-👤 Creator
-
-{creator}
-
-https://pump.fun/{mint}
+🔗 https://pump.fun/{mint}
 """
