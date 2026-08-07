@@ -12,6 +12,7 @@ class HeliusWS:
     def __init__(self, callback=None):
 
         self.ws = None
+        self.thread = None
         self.running = False
         self.callback = callback
 
@@ -19,8 +20,35 @@ class HeliusWS:
 
         print("🛰 Helius WebSocket bağlandı.")
 
-        # V4.1
-        # Buraya transactionSubscribe isteği eklenecek.
+        subscribe = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "transactionSubscribe",
+            "params": [
+                {
+                    "failed": False,
+                    "vote": False,
+                    "accountInclude": []
+                },
+                {
+                    "commitment": "confirmed",
+                    "encoding": "jsonParsed",
+                    "transactionDetails": "full",
+                    "maxSupportedTransactionVersion": 0
+                }
+            ]
+        }
+
+        try:
+
+            ws.send(json.dumps(subscribe))
+
+            print("✅ transactionSubscribe gönderildi.")
+
+        except Exception as e:
+
+            print("❌ Subscribe gönderilemedi")
+            print(e)
 
     def on_message(self, ws, message):
 
@@ -46,7 +74,7 @@ class HeliusWS:
 
         except Exception as e:
 
-            print("Helius Parse Hatası")
+            print("❌ Helius Parse Hatası")
             print(e)
 
     def on_error(self, ws, error):
@@ -58,6 +86,8 @@ class HeliusWS:
 
         print("🔌 Helius bağlantısı kapandı.")
 
+        self.ws = None
+
         if self.running:
 
             print("♻️ 5 saniye sonra yeniden bağlanılıyor...")
@@ -67,6 +97,9 @@ class HeliusWS:
             self.start()
 
     def start(self):
+
+        if self.ws is not None:
+            return
 
         self.running = True
 
@@ -78,10 +111,13 @@ class HeliusWS:
             on_close=self.on_close
         )
 
-        threading.Thread(
+        self.thread = threading.Thread(
             target=self.ws.run_forever,
-            daemon=True
-        ).start()
+            daemon=True,
+            name="HeliusWS"
+        )
+
+        self.thread.start()
 
     def stop(self):
 
@@ -90,3 +126,6 @@ class HeliusWS:
         if self.ws:
 
             self.ws.close()
+            self.ws = None
+
+        self.thread = None
