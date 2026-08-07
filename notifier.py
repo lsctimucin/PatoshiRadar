@@ -20,6 +20,21 @@ def calculate_score(
     return min(score, 100)
 
 
+def marketcap_status(market_cap):
+
+    if market_cap >= 100:
+        return "🟢 ÇOK GÜÇLÜ"
+
+    elif market_cap >= 50:
+        return "🟡 GÜÇLÜ"
+
+    elif market_cap >= 20:
+        return "🟠 ORTA"
+
+    else:
+        return "🔴 DÜŞÜK"
+
+
 def build_message(
     name,
     symbol,
@@ -49,6 +64,8 @@ def build_message(
         market_cap
     )
 
+    mc_status = marketcap_status(market_cap)
+
     if score >= 80:
         status = "🟢 YÜKSEK"
     elif score >= 50:
@@ -56,8 +73,17 @@ def build_message(
     else:
         status = "🔴 DÜŞÜK"
 
-    short_creator = creator[:6] + "..." + creator[-6:] if len(creator) > 12 else creator
-    short_mint = mint[:6] + "..." + mint[-6:] if len(mint) > 12 else mint
+    short_creator = (
+        creator[:6] + "..." + creator[-6:]
+        if len(creator) > 12
+        else creator
+    )
+
+    short_mint = (
+        mint[:6] + "..." + mint[-6:]
+        if len(mint) > 12
+        else mint
+    )
 
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
@@ -82,15 +108,21 @@ def build_message(
 {symbol}
 
 💰 <b>Market Cap</b>
+
 {market_cap:.2f} SOL
 
+{mc_status}
+
 👤 <b>Creator</b>
+
 {short_creator}
 
 🪙 <b>Mint</b>
+
 {short_mint}
 
 ⏰ <b>Tespit</b>
+
 {now}
 
 ━━━━━━━━━━━━━━
