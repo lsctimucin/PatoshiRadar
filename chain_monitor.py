@@ -1,4 +1,3 @@
-```python
 """
 Patoshi Radar
 V5.1 - Creator Activity Watch
