@@ -1,4 +1,6 @@
 from datetime import datetime
+
+
 def calculate_score(
     creator_name,
     keyword,
@@ -15,10 +17,7 @@ def calculate_score(
     if market_cap >= 20:
         score += 15
 
-    if score > 100:
-        score = 100
-
-    return score
+    return min(score, 100)
 
 
 def build_message(
@@ -44,11 +43,35 @@ def build_message(
 
     reason_text = "\n\n".join(reasons)
 
+    score = calculate_score(
+        creator_name,
+        keyword,
+        market_cap
+    )
+
+    if score >= 80:
+        status = "🟢 YÜKSEK"
+    elif score >= 50:
+        status = "🟡 ORTA"
+    else:
+        status = "🔴 DÜŞÜK"
+
+    short_creator = creator[:6] + "..." + creator[-6:] if len(creator) > 12 else creator
+    short_mint = mint[:6] + "..." + mint[-6:] if len(mint) > 12 else mint
+
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
     return f"""🚀 <b>PATOSHI RADAR</b>
 
 {reason_text}
+
+━━━━━━━━━━━━━━
+
+🎯 <b>Confidence</b>
+
+{score}/100
+
+{status}
 
 ━━━━━━━━━━━━━━
 
@@ -62,10 +85,10 @@ def build_message(
 {market_cap:.2f} SOL
 
 👤 <b>Creator</b>
-<code>{creator}</code>
+{short_creator}
 
 🪙 <b>Mint</b>
-<code>{mint}</code>
+{short_mint}
 
 ⏰ <b>Tespit</b>
 {now}
