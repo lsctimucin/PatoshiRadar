@@ -16,25 +16,25 @@ import websocket
 
 HELIUS_API_KEY = os.getenv("HELIUS_API_KEY", "").strip()
 
-if not HELIUS_API_KEY:
-    print("⚠️ HELIUS_API_KEY bulunamadı.")
+# Helius transactionSubscribe için Pump.fun programı
+PUMP_FUN_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 
-
-# Helius WebSocket
 WS_URL = (
     f"wss://mainnet.helius-rpc.com/"
     f"?api-key={HELIUS_API_KEY}"
 )
 
 
-# İzlenecek tokenlar
-WATCHED_TOKENS = set()
+# ============================================================
+# GLOBAL DURUM
+# ============================================================
 
-# Çift kayıtları engellemek için
+WATCHED_TOKENS = set()
 LOCK = threading.Lock()
 
-# Thread durumu
 _RUNNING = False
+_WS = None
+_SUBSCRIPTION_ID = None
 
 
 # ============================================================
@@ -44,6 +44,9 @@ _RUNNING = False
 def add_token(mint):
     """
     Activity Watch tarafından izlenecek tokenı ekler.
+    Helius subscription Pump.fun programını dinlediği için
+    yeni tokenlar WebSocket subscription'ına tekrar eklenmez.
+    Burada sadece lokal eşleştirme listesine alınırlar.
     """
 
     if not mint:
@@ -51,14 +54,16 @@ def add_token(mint):
 
     mint = str(mint).strip()
 
+    if not mint:
+        return False
+
     with LOCK:
         if mint in WATCHED_TOKENS:
             return False
 
         WATCHED_TOKENS.add(mint)
 
-    print(f"🧬 V5.1 CHAIN MONITOR ADD_TOKEN => {mint}")
-
+    print(f"🧪 V5.1 ADD_TOKEN => {mint}")
     return True
 
 
@@ -72,6 +77,208 @@ def get_tokens():
 
 
 # ============================================================
+# TOKEN EŞLEŞTİRME
+# ============================================================
+
+def _token_is_watched(token):
+    if not token:
+        return False
+
+    with LOCK:
+        return token in WATCHED_TOKENS
+
+
+def _extract_pubkey(account):
+    """
+    jsonParsed accountKeys içindeki pubkey'i güvenli şekilde alır.
+    """
+
+    if isinstance(account, str):
+        return account
+
+    if isinstance(account, dict):
+        return account.get("pubkey", "")
+
+    return ""
+
+
+def _extract_accounts(transaction):
+    """
+    Transaction message.accountKeys içinden tüm pubkey'leri çıkarır.
+    """
+
+    try:
+        message = transaction["transaction"]["message"]
+        account_keys = message.get("accountKeys", [])
+
+        result = []
+
+        for account in account_keys:
+            pubkey = _extract_pubkey(account)
+
+            if pubkey:
+                result.append(pubkey)
+
+        return result
+
+    except Exception:
+        return []
+
+
+def _extract_mint_candidates(transaction):
+    """
+    Transaction içindeki token mint adreslerini bulmaya çalışır.
+
+    Öncelik:
+    1. Account keys
+    2. Parsed token instruction içindeki mint alanları
+    """
+
+    candidates = set()
+
+    # Account keys
+    for pubkey in _extract_accounts(transaction):
+        candidates.add(pubkey)
+
+    try:
+        message = transaction["transaction"]["message"]
+
+        for instruction in message.get("instructions", []):
+            parsed = instruction.get("parsed")
+
+            if isinstance(parsed, dict):
+                info = parsed.get("info", {})
+
+                if isinstance(info, dict):
+                    mint = info.get("mint")
+
+                    if mint:
+                        candidates.add(str(mint))
+
+    except Exception:
+        pass
+
+    return candidates
+
+
+# ============================================================
+# PARSER
+# ============================================================
+
+def _parse_transaction(event):
+    """
+    Helius transactionNotification payload'ını V5.1
+    parser formatına çevirir.
+    """
+
+    if not isinstance(event, dict):
+        return None
+
+    transaction = event.get("transaction")
+
+    if not isinstance(transaction, dict):
+        return None
+
+    meta = transaction.get("meta") or {}
+    tx_body = transaction.get("transaction") or {}
+
+    message = tx_body.get("message") or {}
+
+    account_keys = message.get("accountKeys") or []
+    instructions = message.get("instructions") or []
+    log_messages = meta.get("logMessages") or []
+
+    signature = event.get("signature", "")
+
+    slot = event.get("slot")
+
+    fee = meta.get("fee", 0)
+
+    err = meta.get("err")
+
+    accounts = _extract_accounts(transaction)
+
+    # İlk signer creator/trader adayıdır.
+    signer = ""
+
+    for account in account_keys:
+        if isinstance(account, dict) and account.get("signer"):
+            signer = account.get("pubkey", "")
+            break
+
+    if not signer and account_keys:
+        signer = _extract_pubkey(account_keys[0])
+
+    watched_token = ""
+
+    candidates = _extract_mint_candidates(transaction)
+
+    with LOCK:
+        for mint in WATCHED_TOKENS:
+            if mint in candidates:
+                watched_token = mint
+                break
+
+    if not watched_token:
+        return None
+
+    return {
+        "signature": signature,
+        "slot": slot,
+        "token": watched_token,
+        "signer": signer,
+        "fee": fee,
+        "err": err,
+        "account_count": len(accounts),
+        "instruction_count": len(instructions),
+        "log_count": len(log_messages),
+        "logs": log_messages,
+        "accounts": accounts,
+    }
+
+
+# ============================================================
+# TRANSACTION ANATOMY
+# ============================================================
+
+def _print_transaction_anatomy(parsed):
+    """
+    Eşleşen transaction için V5.1 Transaction Anatomy çıktısı.
+    """
+
+    if not parsed:
+        return
+
+    signature = parsed["signature"]
+    token = parsed["token"]
+    signer = parsed["signer"]
+
+    print("🔬 V5.1 PARSER CHECK")
+    print(f"   Token      => {token}")
+    print(f"   Signature  => {signature}")
+    print(f"   Slot       => {parsed['slot']}")
+    print(f"   Signer     => {signer}")
+    print(f"   Fee        => {parsed['fee']} lamports")
+    print(f"   Accounts   => {parsed['account_count']}")
+    print(f"   Instructions=> {parsed['instruction_count']}")
+    print(f"   Logs       => {parsed['log_count']}")
+    print(f"   Error      => {parsed['err']}")
+
+    print("🧬 V5.1 TRANSACTION ANATOMY")
+    print(f"   MINT       => {token}")
+    print(f"   CREATOR    => {signer}")
+    print(f"   SIGNATURE  => {signature}")
+    print(f"   SLOT       => {parsed['slot']}")
+    print(f"   FEE        => {parsed['fee']} lamports")
+
+    # İlk birkaç log satırını göster.
+    logs = parsed.get("logs") or []
+
+    for log in logs[:8]:
+        print(f"   LOG        => {log}")
+
+
+# ============================================================
 # HELIUS MESAJI
 # ============================================================
 
@@ -80,61 +287,43 @@ def on_message(ws, message):
     try:
         data = json.loads(message)
 
-    except Exception:
+    except Exception as e:
+        print(f"⚠️ V5.1 JSON PARSE ERROR => {e}")
         return
 
     # Helius subscription cevabı
-    if "result" in data and "id" in data:
-        print(f"🛰️ Helius Subscription => {data}")
-        return
+    if data.get("id") == 1 and "result" in data:
+        global _SUBSCRIPTION_ID
 
-    # Helius event
-    if "method" in data:
-
-        method = data.get("method")
-
-        print(f"🛰️ Helius Event => {method}")
-
-        params = data.get("params", {})
-
-        result = params.get("result")
-
-        if result:
-            process_event(result)
-
-        return
-
-    # Normal veri
-    process_event(data)
-
-
-# ============================================================
-# EVENT İŞLE
-# ============================================================
-
-def process_event(event):
-
-    if not event:
-        return
-
-    try:
-        value = event.get("value", event)
-
-        if isinstance(value, dict):
-
-            signature = value.get("signature")
-
-            if signature:
-                print(
-                    f"🧬 V5.1 TRANSACTION => "
-                    f"{signature[:16]}..."
-                )
-
-    except Exception as e:
+        _SUBSCRIPTION_ID = data.get("result")
 
         print(
-            f"⚠️ V5.1 CHAIN EVENT ERROR => {e}"
+            f"✅ V5.1 transactionSubscribe AKTİF "
+            f"=> subscription={_SUBSCRIPTION_ID}"
         )
+
+        return
+
+    # Helius RPC error
+    if "error" in data:
+        print(f"❌ Helius RPC ERROR => {data['error']}")
+        return
+
+    # Transaction notification
+    if data.get("method") == "transactionNotification":
+
+        params = data.get("params") or {}
+        event = params.get("result")
+
+        if not event:
+            return
+
+        parsed = _parse_transaction(event)
+
+        if parsed:
+            _print_transaction_anatomy(parsed)
+
+        return
 
 
 # ============================================================
@@ -147,10 +336,11 @@ def on_open(ws):
 
     try:
 
-        # Helius transactionSubscribe
-        # Genel transaction akışını dinliyoruz.
+        # Pump.fun programının transactionlarını dinliyoruz.
         #
-        # Filtreleme Activity Watch / Parser tarafında yapılabilir.
+        # Böylece ADD_TOKEN sonradan geldiğinde subscription
+        # değiştirmeye gerek kalmaz. Parser, gelen Pump.fun
+        # transactionlarında WATCHED_TOKENS eşleşmesini yapar.
 
         payload = {
             "jsonrpc": "2.0",
@@ -158,7 +348,9 @@ def on_open(ws):
             "method": "transactionSubscribe",
             "params": [
                 {
-                    "accountInclude": []
+                    "accountInclude": [PUMP_FUN_PROGRAM],
+                    "failed": False,
+                    "vote": False
                 },
                 {
                     "commitment": "confirmed",
@@ -172,9 +364,7 @@ def on_open(ws):
 
         ws.send(json.dumps(payload))
 
-        print(
-            "✅ transactionSubscribe gönderildi."
-        )
+        print("✅ transactionSubscribe gönderildi.")
 
     except Exception as e:
 
@@ -200,6 +390,10 @@ def on_error(ws, error):
 
 def on_close(ws, close_status_code, close_msg):
 
+    global _SUBSCRIPTION_ID
+
+    _SUBSCRIPTION_ID = None
+
     print(
         f"🔴 Helius WebSocket kapandı. "
         f"code={close_status_code} "
@@ -214,6 +408,7 @@ def on_close(ws, close_status_code, close_msg):
 def _run_websocket():
 
     global _RUNNING
+    global _WS
 
     _RUNNING = True
 
@@ -229,14 +424,14 @@ def _run_websocket():
                 )
 
                 time.sleep(10)
-
                 continue
 
             print(
                 "🛰️ Helius WebSocket başlatılıyor..."
+                "🧬 V5.1 CHAIN MONITOR AKTİF"
             )
 
-            ws = websocket.WebSocketApp(
+            _WS = websocket.WebSocketApp(
                 WS_URL,
                 on_open=on_open,
                 on_message=on_message,
@@ -244,7 +439,7 @@ def _run_websocket():
                 on_close=on_close
             )
 
-            ws.run_forever(
+            _WS.run_forever(
                 ping_interval=20,
                 ping_timeout=10
             )
@@ -271,20 +466,18 @@ def start():
     """
     app.py tarafından çağrılır.
 
-    ÖNEMLİ:
-    app.py şu şekilde kullanıyor:
-
+    app.py:
         from chain_monitor import add_token, start as start_chain
-
-    Bu nedenle start() mutlaka bulunmalıdır.
     """
 
     global _RUNNING
 
     if _RUNNING:
+
         print(
             "⚠️ V5.1 Chain Monitor zaten çalışıyor."
         )
+
         return
 
     print(
