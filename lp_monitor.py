@@ -9,7 +9,11 @@ watch_list = {}
 
 def add_token(mint):
     if mint not in watch_list:
-        watch_list[mint] = False
+        watch_list[mint] = {
+            "found": False,
+            "added": time.time()
+        }
+        print(f"👀 LP takibine eklendi: {mint}")
 
 
 def worker():
@@ -20,37 +24,46 @@ def worker():
 
             for mint in list(watch_list.keys()):
 
-                # Daha önce bulunduysa tekrar kontrol etme
-                if watch_list[mint]:
-                    continue
-
                 lp = check_lp(mint)
 
-                if lp:
+                if not lp:
+                    continue
 
-                    watch_list[mint] = True
+                print(f"🟢 LP bulundu: {mint}")
 
-                    print(f"🟢 LP bulundu: {mint}")
+                send_message(
+                    f"""🟢 <b>LP OLUŞTU</b>
 
-                    send_message(
-                        f"""🟢 <b>LP OLUŞTU</b>
+━━━━━━━━━━━━━━
 
-🪙 Mint
+🪙 <b>Mint</b>
+
 <code>{mint}</code>
 
-Likidite havuzu tespit edildi.
+━━━━━━━━━━━━━━
+
+✅ İlk likidite havuzu tespit edildi.
+
+🚀 Patoshi Radar LP Monitor
 """
-                    )
+                )
+
+                # Artık takip etmeye gerek yok
+                del watch_list[mint]
 
             time.sleep(3)
 
         except Exception as e:
 
-            print("LP Monitor Hatası:", e)
+            print("❌ LP Monitor Hatası")
+            print(e)
+
             time.sleep(5)
 
 
 def start():
+
+    print("🟢 LP Monitor başlatıldı.")
 
     threading.Thread(
         target=worker,
