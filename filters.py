@@ -11,6 +11,7 @@ KEYWORDS = [
     "paradotor",
     "patosh",
     "patoshimeme",
+    "a"
 ]
 
 
