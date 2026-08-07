@@ -11,17 +11,22 @@ class TelegramSender:
     def send(self, text):
 
         try:
+
             response = requests.post(
                 f"https://api.telegram.org/bot{self.token}/sendMessage",
                 json={
                     "chat_id": self.chat_id,
-                    "text": text
+                    "text": text,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True
                 },
                 timeout=10
             )
 
             print("Telegram:", response.status_code)
-            print("Telegram Response:", response.text)
+
+            if response.status_code != 200:
+                print(response.text)
 
             return response.status_code == 200
 
