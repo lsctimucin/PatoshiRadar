@@ -1,4 +1,5 @@
 import json
+import time
 
 from database import initialize_database
 from cache import already_sent, mark_sent
@@ -45,7 +46,7 @@ def new_token(data):
     if not creator_name and not keyword:
         return
 
-    # Telegram mesajı oluştur
+    # Telegram mesajını oluştur
     message = build_message(
         name=name,
         symbol=symbol,
@@ -62,6 +63,7 @@ def new_token(data):
     # Telegram başarılıysa
     if send_message(message):
 
+        # Cache'e kaydet
         mark_sent(
             mint,
             name,
@@ -69,7 +71,7 @@ def new_token(data):
             creator
         )
 
-        # Chain Monitor takip listesine ekle
+        # Blockchain takibine ekle
         add_token(
             mint=mint,
             name=name,
@@ -89,5 +91,11 @@ monitor = PumpMonitor(new_token)
 
 monitor.start()
 
-while True:
-    pass
+try:
+
+    while True:
+        time.sleep(1)
+
+except KeyboardInterrupt:
+
+    print("🛑 Patoshi Radar durduruldu.")
