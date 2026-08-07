@@ -631,6 +631,10 @@ def on_message(ws, message):
     if "error" in data:
 
         print(
+            "🛰️ Helius Event => RPC_ERROR"
+        )
+
+        print(
             "❌ V5.1 Helius RPC ERROR => "
             f"{data.get('error')}"
         )
@@ -781,7 +785,7 @@ def on_open(ws):
         )
 
         print(
-            "🔬 V5.1 PARSER HAZIR"
+            "🔬 V5.1 PARSER CHECK => HAZIR"
         )
 
         print(
