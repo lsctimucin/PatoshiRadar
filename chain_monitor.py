@@ -9,7 +9,7 @@ import threading
 import time
 
 from helius_ws import HeliusWS
-from transaction_parser import parse_transaction
+from transaction_parser_v5_1 import parse_transaction
 
 
 WATCH_DURATION = 60
