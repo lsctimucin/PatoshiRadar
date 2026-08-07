@@ -1,7 +1,6 @@
 """
 Patoshi Radar
 V5.1 - Creator Activity Watch
-REAL HELIUS TRANSACTION DEBUG
 
 Akış:
 
@@ -15,7 +14,11 @@ add_token()
     ↓
 Helius WebSocket
     ↓
+process_event()
+    ↓
 transaction_parser
+    ↓
+PARSER CHECK
     ↓
 PARSER MATCH
     ↓
@@ -50,8 +53,7 @@ signature_lock = threading.Lock()
 
 MAX_PROCESSED_SIGNATURES = 10000
 
-# Her token için parser debug sayacı
-# Railway logunun sonsuza kadar büyümesini önler.
+# Her token için parser debug limiti
 MAX_PARSER_DEBUG = 10
 
 
@@ -59,22 +61,28 @@ MAX_PARSER_DEBUG = 10
 # TOKEN WATCH
 # ============================================================
 
-def add_token(mint, name="", symbol="", creator=""):
+def add_token(
+    mint,
+    name="",
+    symbol="",
+    creator=""
+):
     """
     Token'ı 60 saniyelik Activity Watch'a ekler.
 
     İlk Telegram alarmından SONRA çağrılır.
-    Bu nedenle Activity Watch ilk alarmı geciktirmez.
     """
 
     if not mint:
+        print("⚠️ V5.1 add_token: mint boş.")
         return
 
     with watch_lock:
 
         if mint in watch_tokens:
             print(
-                f"⏩ V5.1 Zaten Activity Watch'ta | {mint}"
+                f"⏩ V5.1 Zaten Activity Watch'ta | "
+                f"{mint}"
             )
             return
 
@@ -82,21 +90,31 @@ def add_token(mint, name="", symbol="", creator=""):
 
         watch_tokens[mint] = {
 
-            # Token bilgileri
+            # ------------------------------------------------
+            # Token
+            # ------------------------------------------------
             "mint": mint,
             "name": name,
             "symbol": symbol,
             "creator": creator,
 
-            # Watch zaman bilgileri
+            # ------------------------------------------------
+            # Watch
+            # ------------------------------------------------
             "watch_started_at": now,
-            "watch_expires_at": now + WATCH_DURATION,
+            "watch_expires_at": (
+                now + WATCH_DURATION
+            ),
 
+            # ------------------------------------------------
             # Activity
+            # ------------------------------------------------
             "event_count": 0,
             "last_event_at": None,
 
+            # ------------------------------------------------
             # Detection state
+            # ------------------------------------------------
             "lp_found": False,
             "lp_sol": 0.0,
             "dex": None,
@@ -107,20 +125,27 @@ def add_token(mint, name="", symbol="", creator=""):
             "holders": 0,
             "whale_buy": False,
 
-            # Event geçmişi
+            # ------------------------------------------------
+            # Event history
+            # ------------------------------------------------
             "events": [],
 
+            # ------------------------------------------------
             # Debug
+            # ------------------------------------------------
             "parser_debug_count": 0,
             "anatomy_count": 0,
 
-            # İleride kullanılacak
+            # ------------------------------------------------
+            # Future
+            # ------------------------------------------------
             "activity_update_sent": False,
         }
 
         print("")
         print("=" * 80)
         print("👀 V5.1 ACTIVITY WATCH BAŞLADI")
+        print("=" * 80)
         print(f"Name    : {name}")
         print(f"Symbol  : {symbol}")
         print(f"Mint    : {mint}")
@@ -140,23 +165,68 @@ def remove_token(mint):
     """
 
     with watch_lock:
-        token = watch_tokens.pop(mint, None)
+
+        token = watch_tokens.pop(
+            mint,
+            None
+        )
 
     if token is None:
         return
 
-    elapsed = time.time() - token["watch_started_at"]
+    elapsed = (
+        time.time()
+        - token["watch_started_at"]
+    )
 
     print("")
     print("=" * 80)
     print("🛑 V5.1 ACTIVITY WATCH TAMAMLANDI")
-    print(f"Name    : {token['name']} ({token['symbol']})")
-    print(f"Mint    : {mint}")
-    print(f"Süre    : {elapsed:.1f}s")
-    print(f"Events  : {token['event_count']}")
-    print(f"LP      : {token['lp_found']}")
-    print(f"FirstBuy: {token['first_buy']}")
-    print(f"DEX     : {token['dex']}")
+    print("=" * 80)
+
+    print(
+        f"Name      : "
+        f"{token['name']} ({token['symbol']})"
+    )
+
+    print(
+        f"Mint      : {mint}"
+    )
+
+    print(
+        f"Süre      : {elapsed:.1f}s"
+    )
+
+    print(
+        f"Events    : "
+        f"{token['event_count']}"
+    )
+
+    print(
+        f"ParserDbg : "
+        f"{token['parser_debug_count']}"
+    )
+
+    print(
+        f"Anatomy   : "
+        f"{token['anatomy_count']}"
+    )
+
+    print(
+        f"LP        : "
+        f"{token['lp_found']}"
+    )
+
+    print(
+        f"FirstBuy  : "
+        f"{token['first_buy']}"
+    )
+
+    print(
+        f"DEX       : "
+        f"{token['dex']}"
+    )
+
     print("=" * 80)
     print("")
 
@@ -181,7 +251,9 @@ def get_token(mint):
 
     with watch_lock:
 
-        token = watch_tokens.get(mint)
+        token = watch_tokens.get(
+            mint
+        )
 
         if token is None:
             return None
@@ -209,15 +281,78 @@ def _mark_signature_processed(signature):
         if signature in processed_signatures:
             return True
 
-        processed_signatures.add(signature)
+        processed_signatures.add(
+            signature
+        )
 
-        # Belleğin sınırsız büyümesini engelle
-        if len(processed_signatures) > MAX_PROCESSED_SIGNATURES:
-
+        if (
+            len(processed_signatures)
+            > MAX_PROCESSED_SIGNATURES
+        ):
             processed_signatures.clear()
-            processed_signatures.add(signature)
+
+            processed_signatures.add(
+                signature
+            )
 
         return False
+
+
+# ============================================================
+# HELIUS RESULT NORMALIZER
+# ============================================================
+
+def _extract_result(data):
+    """
+    Helius callback içindeki result nesnesini
+    güvenli şekilde çıkarır.
+
+    Beklenen yapı:
+
+    {
+        "jsonrpc": "2.0",
+        "method": "...",
+        "params": {
+            "result": {
+                ...
+            }
+        }
+    }
+
+    Ayrıca callback doğrudan result gönderirse
+    onu da kabul eder.
+    """
+
+    if not isinstance(data, dict):
+        return None
+
+    # --------------------------------------------------------
+    # Normal Helius WebSocket mesajı
+    # --------------------------------------------------------
+
+    params = data.get("params")
+
+    if isinstance(params, dict):
+
+        result = params.get(
+            "result"
+        )
+
+        if isinstance(result, dict):
+            return result
+
+    # --------------------------------------------------------
+    # Bazı callback yapılarında result doğrudan gelebilir
+    # --------------------------------------------------------
+
+    if (
+        "transaction" in data
+        or "meta" in data
+        or "signature" in data
+    ):
+        return data
+
+    return None
 
 
 # ============================================================
@@ -226,29 +361,46 @@ def _mark_signature_processed(signature):
 
 def _record_event(event):
     """
-    Parser tarafından tracked=True dönen gerçek Helius
-    transaction eventini Activity Watch state'ine kaydeder.
-
-    İlk 3 gerçek eşleşmede tam raw Helius transaction
-    Railway loguna yazılır.
+    Parser tarafından tracked=True dönen
+    gerçek Helius transaction eventini kaydeder.
     """
 
     if not isinstance(event, dict):
         return
 
-    mint = event.get("mint")
+    mint = event.get(
+        "mint"
+    )
 
     if not mint:
+        print(
+            "⚠️ V5.1 MATCH eventinde mint yok."
+        )
         return
 
     with watch_lock:
 
-        token = watch_tokens.get(mint)
+        token = watch_tokens.get(
+            mint
+        )
 
         if token is None:
+            print(
+                f"⚠️ V5.1 Match geldi fakat "
+                f"token artık watch listesinde değil | "
+                f"{mint}"
+            )
             return
 
-        if time.time() >= token["watch_expires_at"]:
+        if (
+            time.time()
+            >= token["watch_expires_at"]
+        ):
+            print(
+                f"⏱️ V5.1 Match geldi fakat "
+                f"watch süresi dolmuş | "
+                f"{mint}"
+            )
             return
 
         # ----------------------------------------------------
@@ -256,16 +408,29 @@ def _record_event(event):
         # ----------------------------------------------------
 
         token["event_count"] += 1
-        token["last_event_at"] = time.time()
+
+        token["last_event_at"] = (
+            time.time()
+        )
 
         event_summary = {
-            "signature": event.get("signature"),
-            "slot": event.get("slot"),
-            "timestamp": event.get("timestamp"),
-            "type": event.get("type"),
+            "signature": event.get(
+                "signature"
+            ),
+            "slot": event.get(
+                "slot"
+            ),
+            "timestamp": event.get(
+                "timestamp"
+            ),
+            "type": event.get(
+                "type"
+            ),
         }
 
-        token["events"].append(event_summary)
+        token["events"].append(
+            event_summary
+        )
 
         # ----------------------------------------------------
         # PARSER MATCH
@@ -274,12 +439,38 @@ def _record_event(event):
         print("")
         print("=" * 80)
         print("🔬 V5.1 PARSER MATCH")
-        print(f"Token      : {token['name']} ({token['symbol']})")
-        print(f"Mint       : {mint}")
-        print(f"Signature  : {event.get('signature')}")
-        print(f"Slot       : {event.get('slot')}")
-        print(f"Type       : {event.get('type')}")
-        print(f"Tracked    : {event.get('tracked')}")
+        print("=" * 80)
+
+        print(
+            f"Token      : "
+            f"{token['name']} "
+            f"({token['symbol']})"
+        )
+
+        print(
+            f"Mint       : {mint}"
+        )
+
+        print(
+            f"Signature  : "
+            f"{event.get('signature')}"
+        )
+
+        print(
+            f"Slot       : "
+            f"{event.get('slot')}"
+        )
+
+        print(
+            f"Type       : "
+            f"{event.get('type')}"
+        )
+
+        print(
+            f"Tracked    : "
+            f"{event.get('tracked')}"
+        )
+
         print("=" * 80)
 
         # ----------------------------------------------------
@@ -289,23 +480,30 @@ def _record_event(event):
         token["anatomy_count"] += 1
 
         print("")
+        print("=" * 80)
         print("🧬 V5.1 TRANSACTION ANATOMY")
-        print("-" * 80)
+        print("=" * 80)
 
         anatomy_fields = [
+
             "signature",
             "slot",
             "timestamp",
             "type",
             "status",
             "network",
+
             "mint",
+
             "buyer",
             "seller",
             "creator",
+
             "dex",
+
             "amount_sol",
             "token_amount",
+
             "lp_created",
             "first_buy",
             "whale_buy",
@@ -314,21 +512,34 @@ def _record_event(event):
         for field in anatomy_fields:
 
             if field in event:
+
                 print(
-                    f"{field:<20}: {event.get(field)}"
+                    f"{field:<20}: "
+                    f"{event.get(field)}"
                 )
+
+        print("=" * 80)
 
         # ----------------------------------------------------
         # ANALYSIS
         # ----------------------------------------------------
 
-        analysis = event.get("analysis")
+        analysis = event.get(
+            "analysis"
+        )
 
-        if isinstance(analysis, dict):
+        if isinstance(
+            analysis,
+            dict
+        ):
 
             print("")
-            print("🧠 ANALYSIS")
-            print("-" * 80)
+            print(
+                "🧠 V5.1 ANALYSIS"
+            )
+            print(
+                "-" * 80
+            )
 
             for key in (
                 "program",
@@ -342,15 +553,18 @@ def _record_event(event):
             ):
 
                 if key in analysis:
+
                     print(
-                        f"{key:<20}: {analysis.get(key)}"
+                        f"{key:<20}: "
+                        f"{analysis.get(key)}"
                     )
 
         # ----------------------------------------------------
-        # GERÇEK BLOCKCHAIN ANATOMİSİ
+        # BLOCKCHAIN ANATOMY
         # ----------------------------------------------------
 
-        anatomy_fields = [
+        blockchain_fields = [
+
             "account_keys",
             "program_ids",
             "instructions",
@@ -361,45 +575,60 @@ def _record_event(event):
         ]
 
         print("")
+        print("=" * 80)
         print("🔬 BLOCKCHAIN ANATOMY")
-        print("-" * 80)
+        print("=" * 80)
 
-        for field in anatomy_fields:
+        for field in blockchain_fields:
 
-            value = event.get(field)
+            value = event.get(
+                field
+            )
 
-            if value is not None:
+            if value is None:
+                continue
 
-                print("")
-                print(f"### {field}")
+            print("")
+            print(
+                f"### {field}"
+            )
 
-                try:
-                    print(
-                        json.dumps(
-                            value,
-                            ensure_ascii=False,
-                            indent=2,
-                            default=str
-                        )
+            try:
+
+                print(
+                    json.dumps(
+                        value,
+                        ensure_ascii=False,
+                        indent=2,
+                        default=str
                     )
+                )
 
-                except Exception as e:
+            except Exception as e:
 
-                    print(
-                        f"JSON yazdırılamadı: {e}"
-                    )
+                print(
+                    f"JSON yazdırılamadı: "
+                    f"{e}"
+                )
 
         # ----------------------------------------------------
         # RAW HELIUS TRANSACTION
         # ----------------------------------------------------
 
-        raw = event.get("raw")
+        raw = event.get(
+            "raw"
+        )
 
-        if raw is not None and token["anatomy_count"] <= 3:
+        if (
+            raw is not None
+            and token["anatomy_count"] <= 3
+        ):
 
             print("")
             print("=" * 80)
-            print("🧪 V5.1 GERÇEK HELIUS TRANSACTION")
+            print(
+                "🧪 V5.1 GERÇEK HELIUS TRANSACTION"
+            )
             print("=" * 80)
 
             try:
@@ -416,42 +645,76 @@ def _record_event(event):
             except Exception as e:
 
                 print(
-                    "⚠️ Raw transaction JSON yazılamadı:",
+                    "⚠️ Raw transaction "
+                    "JSON yazılamadı:",
                     e
                 )
 
             print("=" * 80)
-            print("🧪 TRANSACTION SONU")
+            print(
+                "🧪 TRANSACTION SONU"
+            )
             print("=" * 80)
 
         # ----------------------------------------------------
         # STATE UPDATE
         # ----------------------------------------------------
 
-        if event.get("lp_created"):
-            token["lp_found"] = True
+        if event.get(
+            "lp_created"
+        ):
+            token[
+                "lp_found"
+            ] = True
 
-        if event.get("dex"):
-            token["dex"] = event["dex"]
+        if event.get(
+            "dex"
+        ):
+            token[
+                "dex"
+            ] = event.get(
+                "dex"
+            )
 
-        if event.get("first_buy"):
+        if event.get(
+            "first_buy"
+        ):
 
-            if not token["first_buy"]:
+            if not token[
+                "first_buy"
+            ]:
 
-                token["first_buy"] = True
-                token["first_buy_at"] = time.time()
+                token[
+                    "first_buy"
+                ] = True
 
-        if event.get("whale_buy"):
-            token["whale_buy"] = True
+                token[
+                    "first_buy_at"
+                ] = time.time()
 
-        amount_sol = event.get("amount_sol")
+        if event.get(
+            "whale_buy"
+        ):
+
+            token[
+                "whale_buy"
+            ] = True
+
+        amount_sol = event.get(
+            "amount_sol"
+        )
 
         if (
-            isinstance(amount_sol, (int, float))
+            isinstance(
+                amount_sol,
+                (int, float)
+            )
             and amount_sol > 0
         ):
 
-            token["lp_sol"] = max(
+            token[
+                "lp_sol"
+            ] = max(
                 token["lp_sol"],
                 float(amount_sol)
             )
@@ -459,7 +722,8 @@ def _record_event(event):
         print("")
         print(
             f"🔎 V5.1 Activity Event | "
-            f"{token['name']} ({token['symbol']}) | "
+            f"{token['name']} "
+            f"({token['symbol']}) | "
             f"#{token['event_count']} | "
             f"sig={event.get('signature')}"
         )
@@ -473,57 +737,120 @@ def _record_event(event):
 
 def process_event(data):
     """
-    Helius WebSocket'ten gelen ham transaction'ı parser'a gönderir.
+    Helius WebSocket'ten gelen her mesajı işler.
 
-    Akış:
+    Debug akışı:
 
-        Helius
-          ↓
-        process_event
-          ↓
-        signature kontrolü
-          ↓
-        aktif mint listesi
-          ↓
-        transaction_parser
-          ↓
-        tracked=True ?
-          ↓
-        _record_event()
+        Helius Event
+            ↓
+        RESULT CHECK
+            ↓
+        ACTIVE TOKEN CHECK
+            ↓
+        PARSER
+            ↓
+        PARSER CHECK
+            ↓
+        PARSER MATCH
+            ↓
+        TRANSACTION ANATOMY
     """
 
-    if not isinstance(data, dict):
-        return
-
     # --------------------------------------------------------
-    # PARAMS
+    # CALLBACK KONTROL
     # --------------------------------------------------------
 
-    params = data.get("params")
+    if not isinstance(
+        data,
+        dict
+    ):
 
-    if not isinstance(params, dict):
+        print(
+            "⚠️ V5.1 Helius callback "
+            "dict değil."
+        )
+
         return
+
+    print("")
+    print(
+        "🛰 V5.1 HELIUS EVENT ALINDI"
+    )
 
     # --------------------------------------------------------
     # RESULT
     # --------------------------------------------------------
 
-    result = params.get("result")
+    result = _extract_result(
+        data
+    )
 
-    if not isinstance(result, dict):
+    if not isinstance(
+        result,
+        dict
+    ):
+
+        print(
+            "⚪ V5.1 HELIUS RESULT YOK "
+            "(subscription / system mesajı olabilir)"
+        )
+
+        return
+
+    # --------------------------------------------------------
+    # TRANSACTION CHECK
+    # --------------------------------------------------------
+
+    transaction = result.get(
+        "transaction"
+    )
+
+    if not isinstance(
+        transaction,
+        dict
+    ):
+
+        print(
+            "⚪ V5.1 HELIUS TRANSACTION YOK"
+        )
+
+        print(
+            f"Result keys: "
+            f"{list(result.keys())}"
+        )
+
         return
 
     # --------------------------------------------------------
     # SIGNATURE
     # --------------------------------------------------------
 
-    signature = result.get("signature")
+    signature = result.get(
+        "signature"
+    )
 
-    if _mark_signature_processed(signature):
+    print(
+        f"📦 V5.1 TRANSACTION ALINDI | "
+        f"sig={signature}"
+    )
+
+    # --------------------------------------------------------
+    # DUPLICATE
+    # --------------------------------------------------------
+
+    if _mark_signature_processed(
+        signature
+    ):
+
+        print(
+            f"⏩ V5.1 Duplicate transaction | "
+            f"sig={signature}"
+        )
+
         return
 
     # --------------------------------------------------------
-    # AKTİF TOKENLAR
+    # ACTIVE TOKENS
     # --------------------------------------------------------
 
     with watch_lock:
@@ -533,23 +860,59 @@ def process_event(data):
         )
 
     if not active_mints:
+
+        print(
+            "⚪ V5.1 Aktif Activity Watch tokenı yok."
+        )
+
         return
 
+    print(
+        f"👀 V5.1 ACTIVE TOKENS | "
+        f"{len(active_mints)}"
+    )
+
     # --------------------------------------------------------
-    # PARSER
+    # HER AKTİF MINT İÇİN PARSER
     # --------------------------------------------------------
 
     for mint in active_mints:
 
+        # ----------------------------------------------------
+        # TOKEN KONTROL
+        # ----------------------------------------------------
+
         with watch_lock:
 
-            token = watch_tokens.get(mint)
+            token = watch_tokens.get(
+                mint
+            )
 
             if token is None:
                 continue
 
-            if time.time() >= token["watch_expires_at"]:
+            if (
+                time.time()
+                >= token["watch_expires_at"]
+            ):
                 continue
+
+        # ----------------------------------------------------
+        # PARSER CHECK
+        # ----------------------------------------------------
+
+        print("")
+        print(
+            "⚪ V5.1 PARSER CHECK"
+        )
+
+        print(
+            f"Mint      : {mint}"
+        )
+
+        print(
+            f"Signature : {signature}"
+        )
 
         # ----------------------------------------------------
         # PARSER ÇAĞRISI
@@ -564,17 +927,24 @@ def process_event(data):
 
         except TypeError as e:
 
-            # transaction_parser.py eski V4 ise burada anlaşılır.
             print("")
             print("=" * 80)
-            print("❌ V5.1 PARSER SIGNATURE HATASI")
+            print(
+                "❌ V5.1 PARSER SIGNATURE HATASI"
+            )
+            print("=" * 80)
+
             print(
                 "transaction_parser.py "
-                "tracked_mint desteklemiyor."
+                "tracked_mint parametresini "
+                "desteklemiyor."
             )
-            print(f"Hata: {e}")
+
+            print(
+                f"Hata: {e}"
+            )
+
             print("=" * 80)
-            print("")
 
             continue
 
@@ -582,11 +952,20 @@ def process_event(data):
 
             print("")
             print("=" * 80)
-            print("❌ V5.1 PARSER HATASI")
-            print(f"Mint : {mint}")
-            print(f"Hata : {e}")
+            print(
+                "❌ V5.1 PARSER HATASI"
+            )
             print("=" * 80)
-            print("")
+
+            print(
+                f"Mint : {mint}"
+            )
+
+            print(
+                f"Hata : {e}"
+            )
+
+            print("=" * 80)
 
             continue
 
@@ -598,12 +977,16 @@ def process_event(data):
 
             with watch_lock:
 
-                token = watch_tokens.get(mint)
+                token = watch_tokens.get(
+                    mint
+                )
 
                 if token is not None:
 
                     if (
-                        token["parser_debug_count"]
+                        token[
+                            "parser_debug_count"
+                        ]
                         < MAX_PARSER_DEBUG
                     ):
 
@@ -612,29 +995,44 @@ def process_event(data):
                         ] += 1
 
                         print(
-                            f"⚪ V5.1 PARSER SKIP | "
-                            f"mint={mint} | "
-                            f"sig={signature}"
+                            "⚪ V5.1 PARSER RESULT = NONE"
                         )
 
             continue
 
         # ----------------------------------------------------
-        # TRACKED KONTROLÜ
+        # PARSER SONUCU
         # ----------------------------------------------------
 
-        tracked = event.get("tracked", False)
+        tracked = event.get(
+            "tracked",
+            False
+        )
+
+        print(
+            f"⚪ V5.1 PARSER CHECK SONUCU | "
+            f"tracked={tracked} | "
+            f"mint={mint}"
+        )
+
+        # ----------------------------------------------------
+        # NOT MATCH
+        # ----------------------------------------------------
 
         if not tracked:
 
             with watch_lock:
 
-                token = watch_tokens.get(mint)
+                token = watch_tokens.get(
+                    mint
+                )
 
                 if token is not None:
 
                     if (
-                        token["parser_debug_count"]
+                        token[
+                            "parser_debug_count"
+                        ]
                         < MAX_PARSER_DEBUG
                     ):
 
@@ -643,8 +1041,7 @@ def process_event(data):
                         ] += 1
 
                         print(
-                            f"⚪ V5.1 PARSER CHECK | "
-                            f"tracked=False | "
+                            f"⚪ V5.1 PARSER NO MATCH | "
                             f"mint={mint} | "
                             f"sig={signature}"
                         )
@@ -652,157 +1049,4 @@ def process_event(data):
             continue
 
         # ----------------------------------------------------
-        # GERÇEK MATCH
-        # ----------------------------------------------------
-
-        _record_event(event)
-
-
-# ============================================================
-# 60 SECOND WATCH WORKER
-# ============================================================
-
-def process_token(mint, token):
-    """
-    60 saniyelik watch süresi dolan tokenı kapatır.
-    """
-
-    if token is None:
-        return
-
-    if time.time() < token["watch_expires_at"]:
-        return
-
-    elapsed = (
-        time.time()
-        - token["watch_started_at"]
-    )
-
-    print("")
-    print("=" * 80)
-    print("⏱️ V5.1 60 SANİYE TAMAMLANDI")
-    print(f"Token     : {token['name']} ({token['symbol']})")
-    print(f"Mint      : {mint}")
-    print(f"Süre      : {elapsed:.1f}s")
-    print(f"Events    : {token['event_count']}")
-    print(f"LP        : {token['lp_found']}")
-    print(f"First Buy : {token['first_buy']}")
-    print(f"DEX       : {token['dex']}")
-    print(
-        f"ParserDbg : "
-        f"{token['parser_debug_count']}"
-    )
-    print(
-        f"Anatomy   : "
-        f"{token['anatomy_count']}"
-    )
-    print("=" * 80)
-    print("")
-
-    remove_token(mint)
-
-
-# ============================================================
-# WORKER
-# ============================================================
-
-def worker():
-    """
-    Activity Watch timeout worker.
-    """
-
-    print(
-        f"⚙️ V5.1 Creator Activity Worker başlatıldı | "
-        f"Watch={WATCH_DURATION}s"
-    )
-
-    while True:
-
-        try:
-
-            with watch_lock:
-
-                snapshot = list(
-                    watch_tokens.items()
-                )
-
-            for mint, token in snapshot:
-
-                process_token(
-                    mint,
-                    token
-                )
-
-            time.sleep(1)
-
-        except Exception as e:
-
-            print(
-                "❌ Creator Activity Worker Hatası"
-            )
-
-            print(e)
-
-            time.sleep(3)
-
-
-# ============================================================
-# HELIUS INSTANCE
-# ============================================================
-
-helius = HeliusWS(
-    callback=process_event
-)
-
-
-# ============================================================
-# START
-# ============================================================
-
-def start():
-    """
-    Helius WebSocket ve Activity Worker başlatılır.
-    """
-
-    print("")
-    print("=" * 80)
-    print("🛰 V5.1 CHAIN MONITOR BAŞLIYOR")
-    print("=" * 80)
-    print("🔗 Helius WebSocket")
-    print("🧬 Transaction Parser")
-    print("🔬 Parser Match")
-    print("🧬 Transaction Anatomy")
-    print("🧪 Real Helius Transaction")
-    print("👀 60s Activity Watch")
-    print("=" * 80)
-    print("")
-
-    helius.start()
-
-    threading.Thread(
-        target=worker,
-        daemon=True,
-        name="CreatorActivityWatch"
-    ).start()
-
-
-# ============================================================
-# STOP
-# ============================================================
-
-def stop():
-    """
-    Activity Watch sistemini durdurur.
-    """
-
-    print(
-        "🛑 V5.1 Chain Monitor durduruluyor..."
-    )
-
-    helius.stop()
-
-    with watch_lock:
-        watch_tokens.clear()
-
-    with signature_lock:
-        processed_signatures.clear()
+        #
