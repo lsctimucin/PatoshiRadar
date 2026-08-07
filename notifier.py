@@ -23,21 +23,6 @@ def calculate_score(
     return min(score, 100)
 
 
-def marketcap_status(market_cap):
-
-    if market_cap >= 100:
-        return "🟢 ÇOK GÜÇLÜ"
-
-    elif market_cap >= 50:
-        return "🟡 GÜÇLÜ"
-
-    elif market_cap >= 20:
-        return "🟠 ORTA"
-
-    else:
-        return "🔴 DÜŞÜK"
-
-
 def build_message(
     name,
     symbol,
@@ -49,119 +34,86 @@ def build_message(
     creator_info,
 ):
 
-    reasons = []
-
-    if creator_name:
-        reasons.append(f"🎯 <b>Creator Match</b>\n{creator_name}")
-
-    if keyword:
-        reasons.append(f"🔍 <b>Keyword Match</b>\n{keyword}")
-
-    if not reasons:
-        reasons.append("❓ <b>Bilinmeyen Eşleşme</b>")
-
-    reason_text = "\n\n".join(reasons)
-
     score = calculate_score(
         creator_name,
         keyword,
         market_cap
     )
 
+    # Confidence Emoji
     if score >= 80:
-        status = "🟢 YÜKSEK"
+        confidence = "🟢"
+
     elif score >= 50:
-        status = "🟡 ORTA"
+        confidence = "🟡"
+
     else:
-        status = "🔴 DÜŞÜK"
+        confidence = "🔴"
 
-    mc_status = marketcap_status(market_cap)
+    # MarketCap Emoji
+    if market_cap >= 100:
+        mc = "🟢"
 
-    short_creator = (
-        creator[:6] + "..." + creator[-6:]
-        if len(creator) > 12
-        else creator
-    )
+    elif market_cap >= 50:
+        mc = "🟡"
 
+    elif market_cap >= 20:
+        mc = "🟠"
+
+    else:
+        mc = "🔴"
+
+    # Kısa Mint
     short_mint = (
         mint[:6] + "..." + mint[-6:]
         if len(mint) > 12
         else mint
     )
 
+    # Creator Durumu
     if creator_info["is_new"]:
-        creator_state = "🆕 İlk kez görüldü"
+        creator_state = "🆕 İlk Launch"
 
     elif creator_info["seconds"] < 60:
-        creator_state = "🚨 Çok kısa sürede tekrar coin bastı"
+        creator_state = f"🚨 Launch #{creator_info['count']}"
 
     elif creator_info["minutes"] < 10:
-        creator_state = "⚠️ Yakın zamanda tekrar coin bastı"
+        creator_state = f"⚠️ Launch #{creator_info['count']}"
 
     else:
-        creator_state = "✅ Normal"
+        creator_state = f"✅ Launch #{creator_info['count']}"
 
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    # Bildirim Sebebi
+    reasons = []
+
+    if keyword:
+        reasons.append(f"🔍 Keyword: <b>{keyword}</b>")
+
+    if creator_name:
+        reasons.append(f"🎯 Creator Match: <b>{creator_name}</b>")
+
+    if not reasons:
+        reasons.append("❓ Bilinmeyen Eşleşme")
+
+    reason_text = "\n".join(reasons)
+
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
     return f"""🚀 <b>PATOSHI RADAR</b>
 
+📛 <b>{name} ({symbol})</b>
+
 {reason_text}
 
-━━━━━━━━━━━━━━
+👤 Creator
+{creator_state}
 
-🎯 <b>Confidence</b>
+💰 {market_cap:.2f} SOL {mc}
+🎯 {score}/100 {confidence}
 
-{score}/100
+🪙 <code>{short_mint}</code>
 
-{status}
+⏰ {now}
 
-━━━━━━━━━━━━━━
-
-📛 <b>İsim</b>
-
-{name}
-
-💎 <b>Sembol</b>
-
-{symbol}
-
-💰 <b>Market Cap</b>
-
-{market_cap:.2f} SOL
-
-{mc_status}
-
-━━━━━━━━━━━━━━
-
-👤 <b>Creator</b>
-
-{short_creator}
-
-<code>{creator}</code>
-
-📊 <b>Creator Analizi</b>
-
-Toplam Launch : {creator_info["count"]}
-
-Durum : {creator_state}
-
-━━━━━━━━━━━━━━
-
-🪙 <b>Mint</b>
-
-{short_mint}
-
-<code>{mint}</code>
-
-━━━━━━━━━━━━━━
-
-⏰ <b>Tespit</b>
-
-{now}
-
-━━━━━━━━━━━━━━
-
-🔗 <b>Pump.fun</b>
-
-https://pump.fun/{mint}
+🔗 <a href="https://pump.fun/{mint}">Pump.fun</a>
 """
