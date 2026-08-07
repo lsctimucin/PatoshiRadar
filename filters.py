@@ -5,7 +5,7 @@ KEYWORDS = [
     "patoshi",
     "pats",
     "turan",
-    "pato",
+    "a",
     "patos",
     "paradot",
     "paradotor",
