@@ -10,7 +10,8 @@ from filters import keyword_match, creator_match
 from notifier import build_message
 
 from creator_tracker import update_creator
-from lp_monitor import add_token, start as start_lp
+
+from chain_monitor import add_token, start as start_chain
 
 
 def new_token(data):
@@ -44,7 +45,7 @@ def new_token(data):
     if not creator_name and not keyword:
         return
 
-    # Mesaj oluştur
+    # Telegram mesajı oluştur
     message = build_message(
         name=name,
         symbol=symbol,
@@ -58,7 +59,7 @@ def new_token(data):
 
     print(message)
 
-    # Telegram başarılıysa kaydet
+    # Telegram başarılıysa
     if send_message(message):
 
         mark_sent(
@@ -68,14 +69,19 @@ def new_token(data):
             creator
         )
 
-        # LP takibine ekle
-        add_token(mint)
+        # Chain Monitor takip listesine ekle
+        add_token(
+            mint=mint,
+            name=name,
+            symbol=symbol,
+            creator=creator
+        )
 
 
 initialize_database()
 
-# LP Monitor başlat
-start_lp()
+# Blockchain takip sistemi
+start_chain()
 
 print("🚀 Patoshi Radar başlatılıyor...")
 
