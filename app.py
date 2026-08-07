@@ -9,14 +9,18 @@ from telegram_sender import send_message
 from filters import keyword_match, creator_match
 from notifier import build_message
 
+from creator_tracker import update_creator
 from lp_monitor import add_token, start as start_lp
 
 
 def new_token(data):
+
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
     creator = data.get("traderPublicKey", "")
     print(f"CREATOR => {creator}")
+
+    creator_info = update_creator(creator)
 
     name = data.get("name", "Bilinmiyor")
     symbol = data.get("symbol", "-")
@@ -49,12 +53,14 @@ def new_token(data):
         creator=creator,
         creator_name=creator_name,
         keyword=keyword,
+        creator_info=creator_info,
     )
 
     print(message)
 
     # Telegram başarılıysa kaydet
     if send_message(message):
+
         mark_sent(
             mint,
             name,
@@ -62,8 +68,14 @@ def new_token(data):
             creator
         )
 
+        # LP takibine ekle
+        add_token(mint)
+
 
 initialize_database()
+
+# LP Monitor başlat
+start_lp()
 
 print("🚀 Patoshi Radar başlatılıyor...")
 
