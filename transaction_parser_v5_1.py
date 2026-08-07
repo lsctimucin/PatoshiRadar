@@ -1,31 +1,27 @@
 """
 Patoshi Radar
-V5.1 - Real Transaction Parser
+V5.1 - Transaction Parser
 
 Görev:
-- Helius WebSocket transaction verisini güvenli şekilde ayrıştırır.
-- Transaction anatomy çıkarır.
-- Takip edilen mint ile transaction bağlantısını belirler.
-- Chain Monitor için standart event nesnesi üretir.
 
-NOT:
-Bu sürüm gerçek transaction verisini analiz eder.
-LP / DEX / First Buy / Whale detection henüz kesin olarak
-işaretlenmez. Gerçek transaction örnekleri üzerinden
-detection kuralları sonraki aşamada eklenecektir.
+- Helius WebSocket transaction verisini güvenli şekilde ayrıştırır.
+- Chain Monitor için standart event nesnesi üretir.
+- Takip edilen mint ile transaction arasındaki bağlantıyı belirler.
+- Gerçek transaction anatomisini detection katmanına hazırlar.
+
+V5.1 Detection:
+- LP / DEX / First Buy henüz kesin olarak doldurulmaz.
+- Önce gerçek Helius transaction yapısı gözlemlenir.
 """
 
 from typing import Any, Dict, Optional
 
 
-# ============================================================
-# BASIC HELPERS
-# ============================================================
-
-def _get_result(
-    data: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
-    """Helius subscription mesajından transaction result çıkarır."""
+def _get_result(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Helius WebSocket subscription mesajından
+    transaction result nesnesini çıkarır.
+    """
 
     if not isinstance(data, dict):
         return None
@@ -43,68 +39,21 @@ def _get_result(
     return result
 
 
-def _get_transaction(
-    result: Dict[str, Any]
-) -> Dict[str, Any]:
-    """Transaction objesini güvenli şekilde döndürür."""
-
-    transaction = result.get("transaction")
-
-    if isinstance(transaction, dict):
-        return transaction
-
-    return {}
-
-
-def _get_message(
-    transaction: Dict[str, Any]
-) -> Dict[str, Any]:
-    """Transaction message objesini güvenli şekilde döndürür."""
-
-    message = transaction.get("message")
-
-    if isinstance(message, dict):
-        return message
-
-    return {}
-
-
-def _get_meta(
-    result: Dict[str, Any]
-) -> Dict[str, Any]:
-    """Transaction meta objesini güvenli şekilde döndürür."""
-
-    meta = result.get("meta")
-
-    if isinstance(meta, dict):
-        return meta
-
-    return {}
-
-
-# ============================================================
-# ACCOUNT KEYS
-# ============================================================
-
-def _get_account_keys(
-    message: Dict[str, Any]
-) -> list:
+def _get_account_keys(message: Dict[str, Any]) -> list[str]:
     """
-    accountKeys alanını public key listesine dönüştürür.
+    jsonParsed transaction formatındaki accountKeys
+    alanını güvenli şekilde public key listesine dönüştürür.
     """
 
     keys = []
 
-    account_keys = message.get("accountKeys") or []
-
-    for account in account_keys:
+    for account in message.get("accountKeys") or []:
 
         if isinstance(account, str):
             keys.append(account)
             continue
 
         if isinstance(account, dict):
-
             pubkey = account.get("pubkey")
 
             if pubkey:
@@ -113,264 +62,183 @@ def _get_account_keys(
     return keys
 
 
-# ============================================================
-# PROGRAM IDS
-# ============================================================
-
-def _get_program_ids(
-    message: Dict[str, Any]
-) -> list:
+def _get_program_ids(message: Dict[str, Any]) -> list[str]:
     """
     Transaction instruction'larından programId listesini çıkarır.
     """
 
     programs = []
 
-    instructions = message.get("instructions") or []
-
-    for instruction in instructions:
+    for instruction in message.get("instructions") or []:
 
         if not isinstance(instruction, dict):
             continue
 
         program_id = instruction.get("programId")
 
-        if program_id:
+        if program_id and program_id not in programs:
             programs.append(program_id)
 
-    return list(dict.fromkeys(programs))
+    return programs
 
 
-# ============================================================
-# INSTRUCTIONS
-# ============================================================
-
-def _get_instructions(
-    message: Dict[str, Any]
-) -> list:
+def _get_instructions(message: Dict[str, Any]) -> list[Dict[str, Any]]:
     """
-    Ana instruction'ları sade şekilde döndürür.
+    Top-level instruction'ları standart liste halinde döndürür.
     """
 
     instructions = []
 
     for instruction in message.get("instructions") or []:
 
-        if not isinstance(instruction, dict):
-            continue
-
-        instructions.append(instruction)
+        if isinstance(instruction, dict):
+            instructions.append(instruction)
 
     return instructions
 
 
-# ============================================================
-# INNER INSTRUCTIONS
-# ============================================================
-
 def _get_inner_instructions(
     meta: Dict[str, Any]
-) -> list:
+) -> list[Dict[str, Any]]:
     """
-    Meta içerisindeki innerInstructions verisini döndürür.
+    Meta içerisindeki innerInstructions listesini güvenli şekilde döndürür.
     """
 
-    inner = meta.get("innerInstructions")
+    result = []
 
-    if not isinstance(inner, list):
-        return []
+    for item in meta.get("innerInstructions") or []:
 
-    return inner
+        if isinstance(item, dict):
+            result.append(item)
+
+    return result
 
 
-# ============================================================
-# TOKEN BALANCE CHANGES
-# ============================================================
+def _get_sol_balance_changes(
+    meta: Dict[str, Any]
+) -> list[Dict[str, Any]]:
+    """
+    preBalances / postBalances farklarını çıkarır.
+
+    Henüz buyer/seller veya LP olarak yorumlanmaz.
+    """
+
+    pre = meta.get("preBalances") or []
+    post = meta.get("postBalances") or []
+
+    changes = []
+
+    length = min(len(pre), len(post))
+
+    for index in range(length):
+
+        try:
+            pre_balance = int(pre[index])
+            post_balance = int(post[index])
+
+            delta_lamports = post_balance - pre_balance
+
+            if delta_lamports != 0:
+                changes.append({
+                    "account_index": index,
+                    "pre_lamports": pre_balance,
+                    "post_lamports": post_balance,
+                    "delta_lamports": delta_lamports,
+                    "delta_sol": delta_lamports / 1_000_000_000,
+                })
+
+        except (TypeError, ValueError):
+            continue
+
+    return changes
+
 
 def _get_token_balance_changes(
     meta: Dict[str, Any],
     tracked_mint: Optional[str] = None
-) -> list:
+) -> list[Dict[str, Any]]:
     """
-    preTokenBalances ve postTokenBalances farklarını çıkarır.
+    preTokenBalances / postTokenBalances farklarını çıkarır.
 
-    Çıktı:
-    [
-        {
-            "mint": "...",
-            "owner": "...",
-            "account_index": 1,
-            "pre_amount": 0.0,
-            "post_amount": 100.0,
-            "change": 100.0
-        }
-    ]
+    tracked_mint verilirse özellikle o mint'in değişimleri
+    ayrıca yakalanır.
     """
 
     pre_balances = meta.get("preTokenBalances") or []
     post_balances = meta.get("postTokenBalances") or []
 
-    changes = {}
+    changes = []
 
-    # --------------------------------------------------------
-    # PRE
-    # --------------------------------------------------------
+    pre_map = {}
+    post_map = {}
 
     for balance in pre_balances:
 
         if not isinstance(balance, dict):
             continue
 
-        mint = balance.get("mint")
+        key = (
+            balance.get("accountIndex"),
+            balance.get("mint"),
+            balance.get("owner"),
+        )
 
-        if tracked_mint and mint != tracked_mint:
-            continue
-
-        index = balance.get("accountIndex")
-
-        key = (index, mint)
-
-        ui_amount = 0.0
-
-        token_amount = balance.get("uiTokenAmount")
-
-        if isinstance(token_amount, dict):
-            raw = token_amount.get("uiAmount")
-
-            if isinstance(raw, (int, float)):
-                ui_amount = float(raw)
-
-        changes[key] = {
-            "mint": mint,
-            "owner": balance.get("owner"),
-            "account_index": index,
-            "pre_amount": ui_amount,
-            "post_amount": 0.0,
-        }
-
-    # --------------------------------------------------------
-    # POST
-    # --------------------------------------------------------
+        pre_map[key] = balance
 
     for balance in post_balances:
 
         if not isinstance(balance, dict):
             continue
 
-        mint = balance.get("mint")
+        key = (
+            balance.get("accountIndex"),
+            balance.get("mint"),
+            balance.get("owner"),
+        )
+
+        post_map[key] = balance
+
+    all_keys = set(pre_map.keys()) | set(post_map.keys())
+
+    for key in all_keys:
+
+        pre = pre_map.get(key) or {}
+        post = post_map.get(key) or {}
+
+        mint = post.get("mint") or pre.get("mint")
 
         if tracked_mint and mint != tracked_mint:
             continue
 
-        index = balance.get("accountIndex")
-
-        key = (index, mint)
-
-        if key not in changes:
-
-            changes[key] = {
-                "mint": mint,
-                "owner": balance.get("owner"),
-                "account_index": index,
-                "pre_amount": 0.0,
-                "post_amount": 0.0,
-            }
-
-        token_amount = balance.get("uiTokenAmount")
-
-        ui_amount = 0.0
-
-        if isinstance(token_amount, dict):
-            raw = token_amount.get("uiAmount")
-
-            if isinstance(raw, (int, float)):
-                ui_amount = float(raw)
-
-        changes[key]["post_amount"] = ui_amount
-
-    # --------------------------------------------------------
-    # FINAL
-    # --------------------------------------------------------
-
-    result = []
-
-    for change in changes.values():
-
-        change["change"] = (
-            change["post_amount"]
-            - change["pre_amount"]
+        pre_ui = (
+            (pre.get("uiTokenAmount") or {}).get("uiAmount")
         )
 
-        result.append(change)
+        post_ui = (
+            (post.get("uiTokenAmount") or {}).get("uiAmount")
+        )
 
-    return result
-
-
-# ============================================================
-# SOL BALANCE CHANGES
-# ============================================================
-
-def _get_sol_balance_changes(
-    meta: Dict[str, Any],
-    account_keys: list
-) -> list:
-    """
-    lamports balance değişimlerini SOL olarak çıkarır.
-    """
-
-    pre_balances = meta.get("preBalances") or []
-    post_balances = meta.get("postBalances") or []
-
-    changes = []
-
-    count = min(
-        len(pre_balances),
-        len(post_balances)
-    )
-
-    for index in range(count):
-
-        pre = pre_balances[index]
-        post = post_balances[index]
-
-        if not isinstance(pre, (int, float)):
+        try:
+            pre_amount = float(pre_ui or 0)
+            post_amount = float(post_ui or 0)
+        except (TypeError, ValueError):
             continue
 
-        if not isinstance(post, (int, float)):
+        delta = post_amount - pre_amount
+
+        if delta == 0:
             continue
-
-        diff_lamports = post - pre
-
-        if diff_lamports == 0:
-            continue
-
-        public_key = None
-
-        if index < len(account_keys):
-            public_key = account_keys[index]
 
         changes.append({
-            "account_index": index,
-            "account": public_key,
-            "pre_lamports": pre,
-            "post_lamports": post,
-            "change_lamports": diff_lamports,
-            "change_sol": diff_lamports / 1_000_000_000,
+            "account_index": key[0],
+            "mint": mint,
+            "owner": key[2],
+            "pre_amount": pre_amount,
+            "post_amount": post_amount,
+            "delta": delta,
         })
 
     return changes
-
-
-# ============================================================
-# MINT DETECTION
-# ============================================================
-
-def _mint_in_account_keys(
-    account_keys: list,
-    mint: str
-) -> bool:
-
-    return mint in account_keys
 
 
 def _mint_in_instructions(
@@ -378,12 +246,10 @@ def _mint_in_instructions(
     mint: str
 ) -> bool:
     """
-    Parsed instruction içerisinde mint arar.
+    Parsed instruction'larda takip edilen mint'i arar.
     """
 
-    instructions = message.get("instructions") or []
-
-    for instruction in instructions:
+    for instruction in message.get("instructions") or []:
 
         if not isinstance(instruction, dict):
             continue
@@ -401,19 +267,6 @@ def _mint_in_instructions(
         if info.get("mint") == mint:
             return True
 
-        # Bazı instruction formatlarında token alanı
-        # source/destination üzerinden gelebilir.
-
-        for key in (
-            "source",
-            "destination",
-            "account",
-            "authority",
-        ):
-
-            if info.get(key) == mint:
-                return True
-
     return False
 
 
@@ -421,15 +274,17 @@ def _mint_in_token_balances(
     meta: Dict[str, Any],
     mint: str
 ) -> bool:
+    """
+    preTokenBalances / postTokenBalances içerisinde
+    takip edilen mint'i arar.
+    """
 
     for field in (
         "preTokenBalances",
         "postTokenBalances",
     ):
 
-        balances = meta.get(field) or []
-
-        for balance in balances:
+        for balance in meta.get(field) or []:
 
             if not isinstance(balance, dict):
                 continue
@@ -444,10 +299,11 @@ def _mint_in_logs(
     meta: Dict[str, Any],
     mint: str
 ) -> bool:
+    """
+    Transaction loglarında mint adresini arar.
+    """
 
-    logs = meta.get("logMessages") or []
-
-    for log in logs:
+    for log in meta.get("logMessages") or []:
 
         if mint in str(log):
             return True
@@ -460,161 +316,61 @@ def transaction_mentions_mint(
     mint: str
 ) -> bool:
     """
-    Transaction'ın takip edilen mint ile ilişkisini kontrol eder.
+    Transaction ile takip edilen mint arasındaki bağlantıyı belirler.
 
-    Bu fonksiyon detection değildir.
-    Sadece transaction ↔ mint bağlantısını belirler.
+    Bu fonksiyon LP / DEX / Swap detection değildir.
+
+    Yalnızca:
+
+    - accountKeys
+    - parsed instructions
+    - token balances
+    - logMessages
+
+    üzerinden bağlantı arar.
     """
 
     if not mint:
         return False
 
-    transaction = _get_transaction(result)
-    message = _get_message(transaction)
-    meta = _get_meta(result)
+    transaction = result.get("transaction") or {}
 
-    account_keys = _get_account_keys(message)
+    message = transaction.get("message") or {}
+
+    meta = result.get("meta") or {}
+
+    if not isinstance(message, dict):
+        message = {}
+
+    if not isinstance(meta, dict):
+        meta = {}
 
     # 1. Account keys
-    if _mint_in_account_keys(
-        account_keys,
-        mint
-    ):
+    if mint in _get_account_keys(message):
         return True
 
     # 2. Parsed instructions
-    if _mint_in_instructions(
-        message,
-        mint
-    ):
+    if _mint_in_instructions(message, mint):
         return True
 
     # 3. Token balances
-    if _mint_in_token_balances(
-        meta,
-        mint
-    ):
+    if _mint_in_token_balances(meta, mint):
         return True
 
     # 4. Logs
-    if _mint_in_logs(
-        meta,
-        mint
-    ):
+    if _mint_in_logs(meta, mint):
         return True
 
     return False
 
-
-# ============================================================
-# BUYER CANDIDATE
-# ============================================================
-
-def _get_signers(
-    message: Dict[str, Any]
-) -> list:
-    """
-    accountKeys içerisinden signer hesaplarını çıkarır.
-    """
-
-    signers = []
-
-    account_keys = message.get("accountKeys") or []
-
-    for account in account_keys:
-
-        if isinstance(account, dict):
-
-            if account.get("signer") is True:
-
-                pubkey = account.get("pubkey")
-
-                if pubkey:
-                    signers.append(pubkey)
-
-    return signers
-
-
-# ============================================================
-# STATUS
-# ============================================================
-
-def _get_status(
-    meta: Dict[str, Any]
-) -> str:
-    """
-    Transaction confirmation / execution durumunu belirler.
-    """
-
-    err = meta.get("err")
-
-    if err is None:
-        return "SUCCESS"
-
-    return "FAILED"
-
-
-# ============================================================
-# AMOUNT EXTRACTION
-# ============================================================
-
-def _calculate_token_amount(
-    token_changes: list
-) -> float:
-    """
-    Takip edilen mint için toplam pozitif token değişimini bulur.
-    """
-
-    total = 0.0
-
-    for change in token_changes:
-
-        amount = change.get("change", 0)
-
-        if isinstance(amount, (int, float)) and amount > 0:
-            total += float(amount)
-
-    return total
-
-
-def _calculate_sol_amount(
-    sol_changes: list
-) -> float:
-    """
-    Pozitif SOL değişimini hesaplar.
-
-    Detection aşamasında bunun hangi hesaba ait olduğu ayrıca
-    analiz edilecektir.
-    """
-
-    total = 0.0
-
-    for change in sol_changes:
-
-        amount = change.get("change_sol", 0)
-
-        if isinstance(amount, (int, float)) and amount > 0:
-            total += float(amount)
-
-    return total
-
-
-# ============================================================
-# MAIN PARSER
-# ============================================================
 
 def parse_transaction(
     data: Dict[str, Any],
     tracked_mint: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
     """
-    Helius transaction verisini Patoshi Radar V5.1 event nesnesine
-    dönüştürür.
-
-    Gerçek transaction anatomy çıkarılır.
-
-    LP / DEX / First Buy / Whale detection burada henüz
-    kesinleştirilmez.
+    Helius transaction verisini Patoshi Radar V5.1
+    standart event nesnesine dönüştürür.
     """
 
     try:
@@ -624,57 +380,39 @@ def parse_transaction(
         if not result:
             return None
 
-        transaction = _get_transaction(result)
+        transaction = result.get("transaction")
 
-        if not transaction:
+        if not isinstance(transaction, dict):
             return None
 
-        message = _get_message(transaction)
-        meta = _get_meta(result)
+        message = transaction.get("message") or {}
+        meta = result.get("meta") or {}
+
+        if not isinstance(message, dict):
+            message = {}
+
+        if not isinstance(meta, dict):
+            meta = {}
+
+        # ---------------------------------------------------------
+        # Temel blockchain anatomisi
+        # ---------------------------------------------------------
 
         account_keys = _get_account_keys(message)
         program_ids = _get_program_ids(message)
         instructions = _get_instructions(message)
         inner_instructions = _get_inner_instructions(meta)
 
-        token_balance_changes = (
-            _get_token_balance_changes(
-                meta,
-                tracked_mint=tracked_mint
-            )
+        sol_balance_changes = _get_sol_balance_changes(meta)
+
+        token_balance_changes = _get_token_balance_changes(
+            meta,
+            tracked_mint=tracked_mint
         )
 
-        sol_balance_changes = (
-            _get_sol_balance_changes(
-                meta,
-                account_keys
-            )
-        )
-
-        tracked = False
-
-        if tracked_mint:
-
-            tracked = transaction_mentions_mint(
-                result,
-                tracked_mint
-            )
-
-        signers = _get_signers(message)
-
-        status = _get_status(meta)
-
-        token_amount = _calculate_token_amount(
-            token_balance_changes
-        )
-
-        amount_sol = _calculate_sol_amount(
-            sol_balance_changes
-        )
-
-        # ----------------------------------------------------
-        # EVENT
-        # ----------------------------------------------------
+        # ---------------------------------------------------------
+        # Event
+        # ---------------------------------------------------------
 
         event = {
 
@@ -686,7 +424,7 @@ def parse_transaction(
 
             # Event
             "type": "UNKNOWN",
-            "status": status,
+            "status": "CONFIRMED",
 
             # Blockchain
             "signature": result.get("signature"),
@@ -699,7 +437,7 @@ def parse_transaction(
             "symbol": None,
 
             # Wallet
-            "buyer": signers[0] if signers else None,
+            "buyer": None,
             "seller": None,
             "creator": None,
 
@@ -707,26 +445,39 @@ def parse_transaction(
             "dex": None,
 
             # Financial
-            "amount_sol": amount_sol,
-            "token_amount": token_amount,
+            "amount_sol": 0.0,
+            "token_amount": 0.0,
 
-            # Detection flags
+            # Activity flags
             "lp_created": False,
             "first_buy": False,
             "whale_buy": False,
 
             # Tracking
-            "tracked": tracked,
+            "tracked": False,
 
-            # Transaction anatomy
+            # -----------------------------------------------------
+            # REAL TRANSACTION ANATOMY
+            # -----------------------------------------------------
+
+            "account_keys": account_keys,
+
             "program_ids": program_ids,
-            "instructions": instructions,
-            "inner_instructions": inner_instructions,
-            "sol_balance_changes": sol_balance_changes,
-            "token_balance_changes": token_balance_changes,
-            "signers": signers,
 
+            "instructions": instructions,
+
+            "inner_instructions": inner_instructions,
+
+            "sol_balance_changes": sol_balance_changes,
+
+            "token_balance_changes": token_balance_changes,
+
+            "log_messages": meta.get("logMessages") or [],
+
+            # -----------------------------------------------------
             # Analysis
+            # -----------------------------------------------------
+
             "analysis": {
 
                 "engine": "Patoshi Radar",
@@ -748,9 +499,13 @@ def parse_transaction(
                 "warnings": [],
 
                 "errors": [],
+
             },
 
-            # Raw data
+            # -----------------------------------------------------
+            # Raw transaction
+            # -----------------------------------------------------
+
             "transaction": transaction,
 
             "message": message,
@@ -760,65 +515,92 @@ def parse_transaction(
             "raw": result,
         }
 
-        # ----------------------------------------------------
-        # BASIC ANALYSIS INFORMATION
-        # ----------------------------------------------------
+        # ---------------------------------------------------------
+        # Mint tracking
+        # ---------------------------------------------------------
 
-        if program_ids:
+        if tracked_mint:
 
-            event["analysis"]["program"] = (
-                program_ids[0]
+            event["tracked"] = transaction_mentions_mint(
+                result,
+                tracked_mint
             )
 
-        if instructions:
+        # ---------------------------------------------------------
+        # Parser debug
+        #
+        # SADECE takip edilen mint bulunduğunda çalışır.
+        # Böylece Railway logları gereksiz yere şişmez.
+        # ---------------------------------------------------------
 
-            first_instruction = instructions[0]
+        if event["tracked"]:
 
-            if isinstance(
-                first_instruction,
-                dict
-            ):
-
-                event["analysis"]["instruction"] = (
-                    first_instruction.get("program")
-                    or first_instruction.get("type")
-                )
-
-        if tracked:
-
-            event["analysis"]["matched"].append(
-                "MINT"
+            print(
+                f"🔬 V5.1 PARSER MATCH | "
+                f"mint={tracked_mint} | "
+                f"sig={event.get('signature')}"
             )
 
-            event["analysis"]["reason"].append(
-                "Transaction tracked mint ile ilişkili."
+            print(
+                f"   Programs      : "
+                f"{len(program_ids)}"
             )
 
-        if status == "FAILED":
-
-            event["analysis"]["warnings"].append(
-                "Transaction failed."
+            print(
+                f"   Instructions  : "
+                f"{len(instructions)}"
             )
 
-        if not program_ids:
-
-            event["analysis"]["warnings"].append(
-                "Program ID bulunamadı."
+            print(
+                f"   Inner         : "
+                f"{len(inner_instructions)}"
             )
 
-        if not instructions:
+            print(
+                f"   SOL Changes   : "
+                f"{len(sol_balance_changes)}"
+            )
 
-            event["analysis"]["warnings"].append(
-                "Instruction bulunamadı."
+            print(
+                f"   Token Changes : "
+                f"{len(token_balance_changes)}"
+            )
+
+            print(
+                f"   Logs          : "
+                f"{len(event['log_messages'])}"
+            )
+
+            print(
+                f"🧬 V5.1 TRANSACTION ANATOMY | "
+                f"{tracked_mint}"
+            )
+
+            print(
+                f"   Program IDs = "
+                f"{program_ids}"
+            )
+
+            print(
+                f"   Instructions = "
+                f"{instructions}"
+            )
+
+            print(
+                f"   SOL Changes = "
+                f"{sol_balance_changes}"
+            )
+
+            print(
+                f"   Token Changes = "
+                f"{token_balance_changes}"
             )
 
         return event
 
     except Exception as e:
 
-        print("")
         print("❌ V5.1 Transaction Parser Hatası")
-        print(f"❌ {type(e).__name__}: {e}")
-        print("")
+        print(e)
 
         return None
