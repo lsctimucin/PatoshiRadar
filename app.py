@@ -71,13 +71,14 @@ def new_token(data):
             creator
         )
 
+        # =====================================================
         # V5.1 DEBUG
-        print(
-            f"🧪 V5.1 add_token çağrılıyor | "
-            f"{name} ({symbol}) | {mint}"
-        )
+        # =====================================================
+        print(f"🧪 V5.1 ADD_TOKEN => {mint}")
 
-        # Blockchain Activity Watch'a ekle
+        # =====================================================
+        # V5.1 Creator Activity Watch
+        # =====================================================
         add_token(
             mint=mint,
             name=name,
