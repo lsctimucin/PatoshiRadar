@@ -1,6 +1,9 @@
 import threading
 import time
 
+from helius_ws import HeliusWS
+
+
 # Takip edilen coinler
 watch_tokens = {}
 
@@ -12,7 +15,7 @@ def add_token(
     creator=""
 ):
     """
-    Yeni coin takip listesine eklenir.
+    Yeni coin takip listesine ekler.
     """
 
     if mint not in watch_tokens:
@@ -23,10 +26,12 @@ def add_token(
             "creator": creator,
             "created": time.time(),
 
-            # Durumlar
+            # Blockchain olayları
             "lp_found": False,
             "first_buy": False,
-            "dex": None
+            "dex": None,
+            "holders": 0,
+            "whale_buy": False
         }
 
         print(f"👀 Takibe eklendi : {name} ({mint})")
@@ -36,22 +41,30 @@ def remove_token(mint):
 
     if mint in watch_tokens:
 
-        del watch_tokens[mint]
+        del watch_tokens[mint)
+
+        print(f"🗑 Takipten çıkarıldı : {mint}")
+
+
+def process_event(data):
+    """
+    Helius WebSocket'ten gelen eventler.
+    V4.1'de sadece loglanıyor.
+    V4.2'de LP Detection eklenecek.
+    """
+
+    print("📦 Blockchain Event")
+    print(data)
 
 
 def process_token(mint, token):
-
     """
-    V4'te burası boş.
-    V5'te Helius transaction burada analiz edilecek.
+    Gelecekte zaman bazlı kontroller burada yapılacak.
     """
-
     pass
 
 
 def worker():
-
-    print("🛰 Chain Monitor çalışıyor...")
 
     while True:
 
@@ -65,14 +78,29 @@ def worker():
 
         except Exception as e:
 
-            print("Chain Monitor:", e)
+            print("❌ Chain Monitor Hatası")
+            print(e)
 
             time.sleep(3)
 
 
+helius = HeliusWS(
+    callback=process_event
+)
+
+
 def start():
+
+    print("🛰 Chain Monitor çalışıyor...")
+
+    helius.start()
 
     threading.Thread(
         target=worker,
         daemon=True
     ).start()
+
+
+def stop():
+
+    helius.stop()
