@@ -1,4 +1,24 @@
 from datetime import datetime
+def calculate_score(
+    creator_name,
+    keyword,
+    market_cap
+):
+    score = 0
+
+    if creator_name:
+        score += 60
+
+    if keyword:
+        score += 25
+
+    if market_cap >= 20:
+        score += 15
+
+    if score > 100:
+        score = 100
+
+    return score
 
 
 def build_message(
