@@ -9,6 +9,8 @@ from telegram_sender import send_message
 from filters import keyword_match, creator_match
 from notifier import build_message
 
+from lp_monitor import add_token, start as start_lp
+
 
 def new_token(data):
     print(json.dumps(data, indent=2, ensure_ascii=False))
