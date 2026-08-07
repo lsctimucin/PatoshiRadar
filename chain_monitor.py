@@ -2,14 +2,6 @@
 Patoshi Radar
 V5.1 - Creator Activity Watch
 Integrated with transaction_parser_v5_1
-
-Akış:
-Helius WebSocket
-    -> process_event()
-    -> parse_transaction()
-    -> tracked mint kontrolü
-    -> Activity Watch state güncellemesi
-    -> 60 saniye timeout
 """
 
 import json
@@ -22,25 +14,16 @@ from transaction_parser import parse_transaction
 
 WATCH_DURATION = 60
 
-# Takip edilen tokenlar
 watch_tokens = {}
-
-# Thread güvenliği
 watch_lock = threading.RLock()
 
-# Aynı transaction'ın birden fazla kez işlenmesini önler
 processed_signatures = set()
 signature_lock = threading.Lock()
 MAX_PROCESSED_SIGNATURES = 10000
 
 
 def add_token(mint, name="", symbol="", creator=""):
-    """
-    Token'ı 60 saniyelik Activity Watch'a ekler.
-
-    app.py bu fonksiyonu ilk Telegram alarmı başarıyla gönderildikten
-    sonra çağırır. Bu nedenle Activity Watch ilk alarmı bekletmez.
-    """
+    """Token'ı 60 saniyelik Activity Watch'a ekler."""
 
     if not mint:
         return
@@ -57,14 +40,10 @@ def add_token(mint, name="", symbol="", creator=""):
             "name": name,
             "symbol": symbol,
             "creator": creator,
-
             "watch_started_at": now,
             "watch_expires_at": now + WATCH_DURATION,
-
             "event_count": 0,
             "last_event_at": None,
-
-            # Detection alanları
             "lp_found": False,
             "lp_sol": 0.0,
             "dex": None,
@@ -72,10 +51,7 @@ def add_token(mint, name="", symbol="", creator=""):
             "first_buy_at": None,
             "holders": 0,
             "whale_buy": False,
-
-            # Şimdilik özet event geçmişi
             "events": [],
-
             "activity_update_sent": False,
         }
 
@@ -110,10 +86,7 @@ def is_watching(mint):
 
 
 def get_token(mint):
-    """
-    Dışarıya token state'inin kopyasını verir.
-    Orijinal state doğrudan dışarıdan değiştirilmez.
-    """
+    """Dışarıya token state'inin kopyasını verir."""
 
     with watch_lock:
         token = watch_tokens.get(mint)
@@ -125,12 +98,7 @@ def get_token(mint):
 
 
 def _mark_signature_processed(signature):
-    """
-    Transaction signature daha önce işlendi mi?
-
-    True  -> daha önce işlendi
-    False -> ilk kez işleniyor
-    """
+    """Transaction signature daha önce işlendi mi?"""
 
     if not signature:
         return False
@@ -141,7 +109,6 @@ def _mark_signature_processed(signature):
 
         processed_signatures.add(signature)
 
-        # Belleğin sınırsız büyümesini önle.
         if len(processed_signatures) > MAX_PROCESSED_SIGNATURES:
             processed_signatures.clear()
             processed_signatures.add(signature)
@@ -153,10 +120,7 @@ def _record_event(event):
     """
     Parser'dan gelen gerçek Helius transaction eventini kaydeder.
 
-    V5.1 DEBUG amacı:
-    - İlk birkaç gerçek transaction'ın ham payload'ını Railway loguna basarız.
-    - Böylece LP / DEX / First Swap kurallarını tahmin etmek yerine
-      gerçek blockchain verisine göre oluşturabiliriz.
+    İlk 3 eşleşen transaction'ın ham payload'ı Railway loguna yazılır.
     """
 
     mint = event.get("mint")
@@ -176,23 +140,14 @@ def _record_event(event):
         token["event_count"] += 1
         token["last_event_at"] = time.time()
 
-        event_summary = {
+        token["events"].append({
             "signature": event.get("signature"),
             "slot": event.get("slot"),
             "timestamp": event.get("timestamp"),
             "type": event.get("type"),
-        }
+        })
 
-        token["events"].append(event_summary)
-
-        # ------------------------------------------------------------
-        # GERÇEK HELIUS VERİSİ
-        # ------------------------------------------------------------
-        # İlk 3 eşleşen transaction'ı tam payload olarak logluyoruz.
-        # Bu veriler LP/DEX/First Swap detection geliştirmek için
-        # kullanılacak.
         if token["event_count"] <= 3:
-
             print("")
             print("=" * 80)
             print("🧪 V5.1 GERÇEK HELIUS TRANSACTION")
@@ -206,14 +161,12 @@ def _record_event(event):
 
             if raw is not None:
                 try:
-                    print(
-                        json.dumps(
-                            raw,
-                            ensure_ascii=False,
-                            indent=2,
-                            default=str
-                        )
-                    )
+                    print(json.dumps(
+                        raw,
+                        ensure_ascii=False,
+                        indent=2,
+                        default=str
+                    ))
                 except Exception as e:
                     print("⚠️ Raw transaction JSON yazılamadı:", e)
 
@@ -222,18 +175,15 @@ def _record_event(event):
             print("=" * 80)
             print("")
 
-        # Şimdilik parser gerçek detection üretmediği için state alanlarını
-        # yalnızca varsa güvenli biçimde alıyoruz.
         if event.get("lp_created"):
             token["lp_found"] = True
 
         if event.get("dex"):
             token["dex"] = event["dex"]
 
-        if event.get("first_buy"):
-            if not token["first_buy"]:
-                token["first_buy"] = True
-                token["first_buy_at"] = time.time()
+        if event.get("first_buy") and not token["first_buy"]:
+            token["first_buy"] = True
+            token["first_buy_at"] = time.time()
 
         if event.get("whale_buy"):
             token["whale_buy"] = True
@@ -255,21 +205,11 @@ def _record_event(event):
 
 
 def process_event(data):
-    """
-    Helius'tan gelen ham mesajı parser'a gönderir.
-
-    Parser:
-        raw Helius event
-            -> standard event
-            -> tracked=True/False
-
-    Bu katman yalnızca takip edilen tokenları kabul eder.
-    """
+    """Helius'tan gelen ham mesajı parser'a gönderir."""
 
     if not isinstance(data, dict):
         return
 
-    # Önce subscription mesajından signature'ı hızlıca kontrol et.
     params = data.get("params")
 
     if not isinstance(params, dict):
@@ -285,13 +225,10 @@ def process_event(data):
     if _mark_signature_processed(signature):
         return
 
-    # Her aktif token için parser'a takip edilen mint'i veriyoruz.
-    # Parser gerçek transaction ↔ mint bağlantısını kontrol eder.
     with watch_lock:
         active_mints = list(watch_tokens.keys())
 
     for mint in active_mints:
-
         with watch_lock:
             token = watch_tokens.get(mint)
 
@@ -363,9 +300,7 @@ def worker():
             time.sleep(3)
 
 
-helius = HeliusWS(
-    callback=process_event
-)
+helius = HeliusWS(callback=process_event)
 
 
 def start():
@@ -394,4 +329,3 @@ def stop():
 
     with signature_lock:
         processed_signatures.clear()
-```
