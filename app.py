@@ -1,28 +1,281 @@
-# ============================================================
-# PATOSHI RADAR V5.1
-# app.py - FINAL
-# ============================================================
+import json
+import time
+
+from database import initialize_database
+from cache import already_sent, mark_sent
 
 from pump_monitor import PumpMonitor
-from telegram_sender import TelegramSender
-from config import BOT_TOKEN, CHAT_ID
+from telegram_sender import send_message
 
-from filters import matches_keyword, matches_creator
-from cache import already_sent, mark_sent
-from database import initialize_database
+from filters import keyword_match, creator_match
+from notifier import build_message
 
-from alchemy_activity_watch import start as alchemy_start
-from alchemy_activity_watch import add_token as alchemy_add_token
+from creator_tracker import update_creator
+
+from chain_monitor import add_token, start as start_chain
 
 
 # ============================================================
-# TELEGRAM
+# ALCHEMY V5.1
 # ============================================================
 
-telegram = TelegramSender(
-    BOT_TOKEN,
-    CHAT_ID
-)
+try:
+    from alchemy_activity_watch import (
+        start as start_alchemy,
+        add_token as add_alchemy_token
+    )
+
+    ALCHEMY_AVAILABLE = True
+
+    print(
+        "🧬 V5.1 ALCHEMY MODULE YÜKLENDİ.",
+        flush=True
+    )
+
+except Exception as e:
+
+    ALCHEMY_AVAILABLE = False
+
+    start_alchemy = None
+    add_alchemy_token = None
+
+    print(
+        "⚠️ V5.1 ALCHEMY MODULE YÜKLENEMEDİ => "
+        f"{e}",
+        flush=True
+    )
+
+
+# ============================================================
+# TOKEN CALLBACK
+# ============================================================
+
+def new_token(data):
+
+    print(
+        json.dumps(
+            data,
+            indent=2,
+            ensure_ascii=False
+        ),
+        flush=True
+    )
+
+    creator = data.get(
+        "traderPublicKey",
+        ""
+    )
+
+    print(
+        f"CREATOR => {creator}",
+        flush=True
+    )
+
+
+    # ========================================================
+    # CREATOR
+    # ========================================================
+
+    creator_info = update_creator(
+        creator
+    )
+
+
+    # ========================================================
+    # TOKEN DATA
+    # ========================================================
+
+    name = data.get(
+        "name",
+        "Bilinmiyor"
+    )
+
+    symbol = data.get(
+        "symbol",
+        "-"
+    )
+
+    mint = data.get(
+        "mint",
+        ""
+    )
+
+    market_cap = data.get(
+        "marketCapSol",
+        0
+    )
+
+
+    # ========================================================
+    # MINT KONTROL
+    # ========================================================
+
+    if not mint:
+
+        return
+
+
+    # ========================================================
+    # DUPLICATE
+    # ========================================================
+
+    if already_sent(mint):
+
+        print(
+            f"⏩ Daha önce bildirildi: {mint}",
+            flush=True
+        )
+
+        return
+
+
+    # ========================================================
+    # FILTERS
+    # ========================================================
+
+    creator_name = creator_match(
+        creator
+    )
+
+    keyword = keyword_match(
+        name,
+        symbol
+    )
+
+
+    # ========================================================
+    # NO MATCH
+    # ========================================================
+
+    if not creator_name and not keyword:
+
+        return
+
+
+    # ========================================================
+    # TELEGRAM MESSAGE
+    # ========================================================
+
+    message = build_message(
+        name=name,
+        symbol=symbol,
+        market_cap=market_cap,
+        mint=mint,
+        creator=creator,
+        creator_name=creator_name,
+        keyword=keyword,
+        creator_info=creator_info,
+    )
+
+
+    print(
+        message,
+        flush=True
+    )
+
+
+    # ========================================================
+    # TELEGRAM FIRST
+    # ========================================================
+
+    telegram_ok = send_message(
+        message
+    )
+
+
+    if not telegram_ok:
+
+        print(
+            "❌ Telegram gönderilemedi."
+            " Activity Watch başlatılmadı.",
+            flush=True
+        )
+
+        return
+
+
+    print(
+        "✅ V5.1 TELEGRAM ALARMI GÖNDERİLDİ => "
+        f"{mint}",
+        flush=True
+    )
+
+
+    # ========================================================
+    # CACHE
+    # ========================================================
+
+    mark_sent(
+        mint,
+        name,
+        symbol,
+        creator
+    )
+
+
+    # ========================================================
+    # HELIUS / CHAIN MONITOR
+    # ========================================================
+
+    try:
+
+        add_token(
+            mint=mint,
+            name=name,
+            symbol=symbol,
+            creator=creator
+        )
+
+        print(
+            "👀 V5.1 CHAIN WATCH ADD_TOKEN => "
+            f"{mint}",
+            flush=True
+        )
+
+    except Exception as e:
+
+        print(
+            "⚠️ V5.1 CHAIN MONITOR ADD_TOKEN ERROR => "
+            f"{e}",
+            flush=True
+        )
+
+
+    # ========================================================
+    # ALCHEMY ACTIVITY WATCH
+    # ========================================================
+
+    if ALCHEMY_AVAILABLE:
+
+        try:
+
+            result = add_alchemy_token(
+                mint=mint,
+                name=name,
+                symbol=symbol,
+                creator=creator
+            )
+
+            print(
+                "👁️ V5.1 ALCHEMY ACTIVITY WATCH "
+                f"ADD_TOKEN => {mint} | result={result}",
+                flush=True
+            )
+
+        except Exception as e:
+
+            print(
+                "⚠️ V5.1 ALCHEMY ADD_TOKEN ERROR => "
+                f"{e}",
+                flush=True
+            )
+
+    else:
+
+        print(
+            "⚠️ V5.1 ALCHEMY AKTİF DEĞİL.",
+            flush=True
+        )
 
 
 # ============================================================
@@ -33,335 +286,91 @@ initialize_database()
 
 
 # ============================================================
-# CREATOR TRACKING
+# CHAIN MONITOR
 # ============================================================
 
-try:
-    from creator_tracker import creator_match
-except ImportError:
-    creator_match = None
+print(
+    "🧬 V5.1 CHAIN MONITOR BAŞLATILIYOR...",
+    flush=True
+)
+
+start_chain()
 
 
 # ============================================================
-# TOKEN CALLBACK
+# ALCHEMY
 # ============================================================
 
-def new_token(data):
+if ALCHEMY_AVAILABLE:
 
     try:
-
-        name = data.get(
-            "name",
-            "Bilinmiyor"
-        )
-
-        symbol = data.get(
-            "symbol",
-            "-"
-        )
-
-        mint = data.get(
-            "mint",
-            ""
-        )
-
-        creator = data.get(
-            "traderPublicKey",
-            data.get(
-                "creator",
-                ""
-            )
-        )
-
-        market_cap = data.get(
-            "marketCapSol",
-            0
-        )
-
-        if not mint:
-            return
-
-
-        # ====================================================
-        # KEYWORD CHECK
-        # ====================================================
-
-        keyword_match = False
-
-        try:
-
-            keyword_match = matches_keyword(
-                name,
-                symbol
-            )
-
-        except TypeError:
-
-            try:
-                keyword_match = matches_keyword(
-                    name
-                )
-
-            except Exception:
-                keyword_match = False
-
-        except Exception as e:
-
-            print(
-                f"⚠️ Keyword filter ERROR => {e}",
-                flush=True
-            )
-
-
-        # ====================================================
-        # CREATOR CHECK
-        # ====================================================
-
-        creator_match_result = False
-
-        if creator_match is not None:
-
-            try:
-
-                creator_match_result = creator_match(
-                    creator
-                )
-
-            except Exception as e:
-
-                print(
-                    f"⚠️ Creator tracker ERROR => {e}",
-                    flush=True
-                )
-
-        else:
-
-            try:
-
-                creator_match_result = matches_creator(
-                    creator
-                )
-
-            except Exception:
-
-                creator_match_result = False
-
-
-        # ====================================================
-        # FILTER
-        # ====================================================
-
-        if not keyword_match and not creator_match_result:
-
-            return
-
-
-        # ====================================================
-        # DUPLICATE CHECK
-        # ====================================================
-
-        if already_sent(mint):
-
-            return
-
-
-        # ====================================================
-        # MESSAGE
-        # ====================================================
-
-        reasons = []
-
-        if keyword_match:
-            reasons.append(
-                "🔎 Keyword eşleşmesi"
-            )
-
-        if creator_match_result:
-            reasons.append(
-                "👤 Creator eşleşmesi"
-            )
-
-        reason_text = "\n".join(
-            reasons
-        )
-
-
-        message = (
-            "🚨 <b>PATOSHI RADAR V5.1</b>\n\n"
-            f"🪙 <b>{name}</b> ({symbol})\n"
-            f"💰 Market Cap: {market_cap} SOL\n\n"
-            f"{reason_text}\n\n"
-            f"🔗 https://pump.fun/coin/{mint}\n"
-            f"📌 <code>{mint}</code>"
-        )
-
-
-        # ====================================================
-        # TELEGRAM - FIRST ALARM
-        # ====================================================
-
-        sent = False
-
-        try:
-
-            sent = telegram.send_message(
-                message
-            )
-
-        except TypeError:
-
-            try:
-
-                sent = telegram.send(
-                    message
-                )
-
-            except Exception as e:
-
-                print(
-                    f"❌ Telegram ERROR => {e}",
-                    flush=True
-                )
-
-        except Exception as e:
-
-            print(
-                f"❌ Telegram ERROR => {e}",
-                flush=True
-            )
-
-
-        # ====================================================
-        # TELEGRAM SUCCESS
-        # ====================================================
-
-        if not sent:
-
-            print(
-                "❌ Telegram gönderilemedi. "
-                "Alchemy Activity Watch başlatılmadı.",
-                flush=True
-            )
-
-            return
-
-
-        print(
-            "✅ V5.1 TELEGRAM ALARM GÖNDERİLDİ => "
-            f"{mint}",
-            flush=True
-        )
-
-
-        # ====================================================
-        # CACHE
-        # ====================================================
-
-        try:
-
-            mark_sent(
-                mint,
-                name,
-                symbol,
-                creator
-            )
-
-        except Exception as e:
-
-            print(
-                f"⚠️ Cache mark ERROR => {e}",
-                flush=True
-            )
-
-
-        # ====================================================
-        # ALCHEMY ACTIVITY WATCH
-        # ====================================================
-
-        try:
-
-            alchemy_add_token(
-                mint=mint,
-                name=name,
-                symbol=symbol,
-                creator=creator
-            )
-
-            print(
-                "👁️ V5.1 ALCHEMY ACTIVITY WATCH "
-                f"BAŞLADI => {mint}",
-                flush=True
-            )
-
-        except Exception as e:
-
-            print(
-                "❌ V5.1 ALCHEMY WATCH ERROR => "
-                f"{e}",
-                flush=True
-            )
-
-
-# ============================================================
-# START
-# ============================================================
-
-def main():
-
-    print(
-        "🚀 PATOSHI RADAR V5.1 BAŞLATILIYOR...",
-        flush=True
-    )
-
-
-    # ========================================================
-    # ALCHEMY
-    # ========================================================
-
-    try:
-
-        alchemy_start()
 
         print(
             "🧬 V5.1 ALCHEMY ACTIVITY WATCH "
-            "BAŞLATILDI.",
+            "BAŞLATILIYOR...",
+            flush=True
+        )
+
+        start_alchemy()
+
+        print(
+            "✅ V5.1 ALCHEMY ACTIVITY WATCH AKTİF",
             flush=True
         )
 
     except Exception as e:
 
         print(
-            "❌ ALCHEMY START ERROR => "
+            "❌ V5.1 ALCHEMY START ERROR => "
             f"{e}",
             flush=True
         )
 
-
-    # ========================================================
-    # PUMP MONITOR
-    # ========================================================
+else:
 
     print(
-        "🚀 PumpPortal monitor başlatılıyor...",
+        "⚠️ V5.1 ALCHEMY MODULE YOK / YÜKLENEMEDİ.",
         flush=True
     )
 
-    monitor = PumpMonitor(
-        new_token
-    )
+
+# ============================================================
+# PATOSHI RADAR
+# ============================================================
+
+print(
+    "🚀 Patoshi Radar başlatılıyor...",
+    flush=True
+)
+
+
+monitor = PumpMonitor(
+    new_token
+)
+
+
+print(
+    "🟢 PATOSHI RADAR V5.1 AKTİF",
+    flush=True
+)
+
+
+monitor.start()
+
+
+# ============================================================
+# KEEP ALIVE
+# ============================================================
+
+try:
+
+    while True:
+
+        time.sleep(1)
+
+except KeyboardInterrupt:
 
     print(
-        "🟢 PATOSHI RADAR V5.1 AKTİF",
+        "🛑 Patoshi Radar durduruldu.",
         flush=True
     )
-
-    monitor.start()
-
-
-# ============================================================
-# ENTRY POINT
-# ============================================================
-
-if __name__ == "__main__":
-
-    main()
