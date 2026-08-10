@@ -2,20 +2,38 @@
 Patoshi Radar
 V5.1 - Transaction Parser
 
-Gerçek Helius transactionSubscribe verisini analiz eder.
+Görev:
 
-Amaç:
-- tracked_mint transaction içinde gerçekten var mı?
-- Hangi programlar çalıştı?
-- Hangi instruction'lar çalıştı?
-- Inner instruction'lar neler?
-- SOL balance değişimleri
-- Token balance değişimleri
-- LP / DEX sinyalleri
-- First Buy sinyali
-- Whale Buy sinyali
+- Helius logsSubscribe + getTransaction akışıyla uyumlu çalışır.
+- Gerçek Solana transaction verisini güvenli şekilde ayrıştırır.
+- Chain Monitor için standart event nesnesi üretir.
+- tracked_mint transaction içerisinde gerçekten var mı kontrol eder.
+- Programları çıkarır.
+- Instruction / Inner Instruction çıkarır.
+- SOL balance değişimlerini çıkarır.
+- Token balance değişimlerini çıkarır.
+- LP / DEX sinyallerini çıkarır.
+- First Buy sinyalini çıkarır.
+- Whale Buy sinyalini çıkarır.
+
+ÖNEMLİ:
+
+Bu parser transactionSubscribe kullanmaz.
+
+Beklenen akış:
+
+logsSubscribe
+    ↓
+signature
+    ↓
+getTransaction
+    ↓
+parse_transaction()
+    ↓
+V5.1 event
 """
 
+from typing import Any, Dict, List, Optional
 import time
 
 
@@ -41,46 +59,44 @@ JUPITER_PROGRAM_IDS = {
 # HELPERS
 # ============================================================
 
-def _safe_list(value):
+def _safe_list(value: Any) -> List[Any]:
     if isinstance(value, list):
         return value
 
     return []
 
 
-def _safe_dict(value):
+def _safe_dict(value: Any) -> Dict[str, Any]:
     if isinstance(value, dict):
         return value
 
     return {}
 
 
-def _pubkey(value):
+def _pubkey(value: Any) -> str:
     """
     Solana jsonParsed account key farklı şekillerde gelebilir.
-
-    Örnek:
-        {"pubkey": "..."}
-        "..."
     """
 
     if isinstance(value, str):
         return value
 
     if isinstance(value, dict):
-        return value.get("pubkey", "")
+        return str(value.get("pubkey", "") or "")
 
     return ""
 
 
-def _extract_account_keys(message):
-    """
-    Transaction message içindeki accountKeys listesini çıkarır.
-    """
+# ============================================================
+# ACCOUNT KEYS
+# ============================================================
 
+def _extract_account_keys(message: Dict[str, Any]) -> List[str]:
     keys = []
 
-    for account in _safe_list(message.get("accountKeys")):
+    for account in _safe_list(
+        message.get("accountKeys")
+    ):
         key = _pubkey(account)
 
         if key:
@@ -89,37 +105,69 @@ def _extract_account_keys(message):
     return keys
 
 
-def _extract_program_ids(message):
+# ============================================================
+# PROGRAM IDS
+# ============================================================
+
+def _extract_program_ids(
+    message: Dict[str, Any],
+    inner_instructions: Optional[List[Dict[str, Any]]] = None,
+) -> List[str]:
     """
-    Transaction instruction'larından program ID'leri çıkarır.
+    Ana ve inner instruction'lardan program ID'lerini çıkarır.
     """
 
     program_ids = []
 
+    def add_program(program_id: Any):
+
+        if not program_id:
+            return
+
+        program_id = str(program_id)
+
+        if program_id not in program_ids:
+            program_ids.append(program_id)
+
     for instruction in _safe_list(
         message.get("instructions")
     ):
+
         if not isinstance(instruction, dict):
             continue
 
-        program_id = instruction.get("programId")
+        add_program(
+            instruction.get("programId")
+        )
 
-        if program_id and program_id not in program_ids:
-            program_ids.append(program_id)
+    for instruction in inner_instructions or []:
+
+        if not isinstance(instruction, dict):
+            continue
+
+        add_program(
+            instruction.get("program_id")
+        )
 
     return program_ids
 
 
-def _extract_instructions(message):
-    """
-    Ana instruction'ları sade formatta çıkarır.
-    """
+# ============================================================
+# MAIN INSTRUCTIONS
+# ============================================================
+
+def _extract_instructions(
+    message: Dict[str, Any]
+) -> List[Dict[str, Any]]:
 
     instructions = []
 
     for index, instruction in enumerate(
-        _safe_list(message.get("instructions"))
+        _safe_list(
+            message.get("instructions")
+        )
     ):
+
         if not isinstance(instruction, dict):
             continue
 
@@ -129,21 +177,26 @@ def _extract_instructions(message):
             "program_id": instruction.get("programId"),
             "accounts": instruction.get("accounts", []),
             "data": instruction.get("data"),
+            "parsed": instruction.get("parsed"),
         })
 
     return instructions
 
 
-def _extract_inner_instructions(meta):
-    """
-    Inner instruction listesini çıkarır.
-    """
+# ============================================================
+# INNER INSTRUCTIONS
+# ============================================================
+
+def _extract_inner_instructions(
+    meta: Dict[str, Any]
+) -> List[Dict[str, Any]]:
 
     inner = []
 
     for group in _safe_list(
         meta.get("innerInstructions")
     ):
+
         if not isinstance(group, dict):
             continue
 
@@ -151,10 +204,12 @@ def _extract_inner_instructions(meta):
 
         instructions = group.get(
             "instructions",
-            []
+            [],
         )
 
-        for instruction in _safe_list(instructions):
+        for instruction in _safe_list(
+            instructions
+        ):
 
             if not isinstance(instruction, dict):
                 continue
@@ -162,36 +217,45 @@ def _extract_inner_instructions(meta):
             inner.append({
                 "parent_index": parent_index,
                 "program": instruction.get("program"),
-                "program_id": instruction.get(
-                    "programId"
-                ),
+                "program_id": instruction.get("programId"),
                 "accounts": instruction.get(
                     "accounts",
-                    []
+                    [],
                 ),
                 "data": instruction.get("data"),
+                "parsed": instruction.get("parsed"),
             })
 
     return inner
 
 
-def _extract_logs(meta):
-    """
-    Transaction logMessages listesini çıkarır.
-    """
+# ============================================================
+# LOGS
+# ============================================================
+
+def _extract_logs(
+    meta: Dict[str, Any]
+) -> List[str]:
 
     logs = []
 
     for log in _safe_list(
         meta.get("logMessages")
     ):
+
         if isinstance(log, str):
             logs.append(log)
 
     return logs
 
 
-def _extract_sol_balance_changes(meta):
+# ============================================================
+# SOL BALANCE CHANGES
+# ============================================================
+
+def _extract_sol_balance_changes(
+    meta: Dict[str, Any]
+) -> List[Dict[str, Any]]:
     """
     preBalances / postBalances farklarını çıkarır.
 
@@ -210,19 +274,21 @@ def _extract_sol_balance_changes(meta):
 
     count = min(
         len(pre),
-        len(post)
+        len(post),
     )
 
     for index in range(count):
 
         try:
+
             before = int(pre[index])
             after = int(post[index])
 
         except (
             TypeError,
-            ValueError
+            ValueError,
         ):
+
             continue
 
         diff_lamports = after - before
@@ -235,13 +301,21 @@ def _extract_sol_balance_changes(meta):
             "before_lamports": before,
             "after_lamports": after,
             "change_lamports": diff_lamports,
-            "change_sol": diff_lamports / 1_000_000_000,
+            "change_sol": (
+                diff_lamports / 1_000_000_000
+            ),
         })
 
     return changes
 
 
-def _extract_token_balance_changes(meta):
+# ============================================================
+# TOKEN BALANCE CHANGES
+# ============================================================
+
+def _extract_token_balance_changes(
+    meta: Dict[str, Any]
+) -> List[Dict[str, Any]]:
     """
     preTokenBalances / postTokenBalances farklarını çıkarır.
     """
@@ -269,6 +343,8 @@ def _extract_token_balance_changes(meta):
 
         pre_map[account_index] = item
 
+    post_map = {}
+
     for item in post:
 
         if not isinstance(item, dict):
@@ -278,17 +354,34 @@ def _extract_token_balance_changes(meta):
             "accountIndex"
         )
 
+        post_map[account_index] = item
+
+    all_indexes = set(
+        pre_map.keys()
+    ) | set(
+        post_map.keys()
+    )
+
+    for account_index in all_indexes:
+
         before_item = pre_map.get(
             account_index,
-            {}
+            {},
         )
 
-        mint = item.get(
-            "mint"
+        after_item = post_map.get(
+            account_index,
+            {},
         )
 
-        owner = item.get(
-            "owner"
+        mint = (
+            after_item.get("mint")
+            or before_item.get("mint")
+        )
+
+        owner = (
+            after_item.get("owner")
+            or before_item.get("owner")
         )
 
         before_amount = (
@@ -298,7 +391,7 @@ def _extract_token_balance_changes(meta):
         )
 
         after_amount = (
-            item
+            after_item
             .get("uiTokenAmount", {})
             .get("uiAmount")
         )
@@ -310,14 +403,17 @@ def _extract_token_balance_changes(meta):
             after_amount = 0
 
         try:
-            change = float(after_amount) - float(
-                before_amount
+
+            change = (
+                float(after_amount)
+                - float(before_amount)
             )
 
         except (
             TypeError,
-            ValueError
+            ValueError,
         ):
+
             continue
 
         if change == 0:
@@ -335,16 +431,20 @@ def _extract_token_balance_changes(meta):
     return changes
 
 
+# ============================================================
+# MINT MATCH
+# ============================================================
+
 def _mint_present(
-    tracked_mint,
-    account_keys,
-    token_changes,
-    instructions,
-    inner_instructions,
-):
+    tracked_mint: Optional[str],
+    account_keys: List[str],
+    token_changes: List[Dict[str, Any]],
+    instructions: List[Dict[str, Any]],
+    inner_instructions: List[Dict[str, Any]],
+    logs: Optional[List[str]] = None,
+) -> bool:
     """
-    tracked_mint transaction içerisinde gerçekten
-    geçiyor mu kontrol eder.
+    tracked_mint transaction içerisinde gerçekten geçiyor mu?
     """
 
     if not tracked_mint:
@@ -374,11 +474,29 @@ def _mint_present(
 
         accounts = instruction.get(
             "accounts",
-            []
+            [],
         )
 
         if tracked_mint in accounts:
             return True
+
+        parsed = instruction.get(
+            "parsed"
+        )
+
+        if isinstance(parsed, dict):
+
+            info = parsed.get(
+                "info"
+            )
+
+            if isinstance(info, dict):
+
+                if (
+                    info.get("mint")
+                    == tracked_mint
+                ):
+                    return True
 
     # --------------------------------------------------------
     # Inner instructions
@@ -388,22 +506,63 @@ def _mint_present(
 
         accounts = instruction.get(
             "accounts",
-            []
+            [],
         )
 
         if tracked_mint in accounts:
             return True
 
+        parsed = instruction.get(
+            "parsed"
+        )
+
+        if isinstance(parsed, dict):
+
+            info = parsed.get(
+                "info"
+            )
+
+            if isinstance(info, dict):
+
+                if (
+                    info.get("mint")
+                    == tracked_mint
+                ):
+                    return True
+
+    # --------------------------------------------------------
+    # Logs
+    # --------------------------------------------------------
+
+    for log in logs or []:
+
+        if tracked_mint in str(log):
+            return True
+
     return False
 
 
-def _detect_dex(program_ids, logs):
+# ============================================================
+# DEX DETECTION
+# ============================================================
+
+def _detect_dex(
+    program_ids: List[str],
+    logs: List[str],
+) -> Optional[str]:
     """
     DEX tespiti.
+
+    Öncelik:
+    1. Program ID
+    2. Log metni
     """
 
-    text = " ".join(logs).lower()
+    text = " ".join(
+        logs
+    ).lower()
 
+    # Raydium
     for program_id in program_ids:
 
         if program_id in RAYDIUM_PROGRAM_IDS:
@@ -412,33 +571,55 @@ def _detect_dex(program_ids, logs):
     if "raydium" in text:
         return "Raydium"
 
-    if "orca" in text:
-        return "Orca"
+    # Jupiter
+    for program_id in program_ids:
 
-    if "meteora" in text:
-        return "Meteora"
+        if program_id in JUPITER_PROGRAM_IDS:
+            return "Jupiter"
 
     if "jupiter" in text:
         return "Jupiter"
 
+    # Orca
+    if "orca" in text:
+        return "Orca"
+
+    # Meteora
+    if "meteora" in text:
+        return "Meteora"
+
     return None
 
 
-def _detect_lp(program_ids, logs):
+# ============================================================
+# LP DETECTION
+# ============================================================
+
+def _detect_lp(
+    program_ids: List[str],
+    logs: List[str],
+) -> bool:
     """
     LP / liquidity sinyali.
+
+    Conservative detection.
     """
 
-    text = " ".join(logs).lower()
+    text = " ".join(
+        logs
+    ).lower()
 
     lp_words = [
         "initialize pool",
         "initialize2",
+        "initialize pool2",
         "add liquidity",
         "addliquidity",
         "liquidity",
         "pool initialized",
         "poolinitialize",
+        "create pool",
+        "create_pool",
     ]
 
     for word in lp_words:
@@ -454,47 +635,127 @@ def _detect_lp(program_ids, logs):
     return False
 
 
-def _detect_first_buy(
-    logs,
-    token_changes,
-):
-    """
-    İlk buy için temel sinyal.
+# ============================================================
+# BUY / SELL LOG DETECTION
+# ============================================================
 
-    Bu V5.1 parser seviyesinde conservative tutulur.
-    Daha ileri aşamada pump.fun instruction decoding
-    ile kesinleştirilebilir.
+def _detect_trade_type(
+    logs: List[str],
+    instructions: List[Dict[str, Any]],
+    inner_instructions: List[Dict[str, Any]],
+) -> str:
+    """
+    Transaction'ın temel trade tipini belirler.
+
+    Şimdilik conservative:
+    BUY / SELL / SWAP / UNKNOWN
     """
 
-    text = " ".join(logs).lower()
+    text = " ".join(
+        logs
+    ).lower()
+
+    # SELL önce kontrol edilir.
+    # Çünkü bazı transaction'larda swap kelimesi
+    # birlikte bulunabilir.
+
+    sell_words = [
+        "sell",
+        "sell_exact",
+        "selling",
+    ]
+
+    for word in sell_words:
+
+        if word in text:
+            return "SELL"
 
     buy_words = [
         "buy",
         "buy_exact",
-        "swap",
         "purchase",
+        "purchasing",
     ]
 
-    has_buy_log = any(
-        word in text
-        for word in buy_words
+    for word in buy_words:
+
+        if word in text:
+            return "BUY"
+
+    if "swap" in text:
+        return "SWAP"
+
+    # Parsed instruction kontrolü
+    all_instructions = (
+        instructions
+        + inner_instructions
     )
 
-    if has_buy_log:
-        return True
+    for instruction in all_instructions:
 
-    # Token balance artışı varsa potansiyel buy
+        parsed = instruction.get(
+            "parsed"
+        )
+
+        if not isinstance(parsed, dict):
+            continue
+
+        instruction_type = str(
+            parsed.get(
+                "type",
+                "",
+            )
+        ).lower()
+
+        if "sell" in instruction_type:
+            return "SELL"
+
+        if "buy" in instruction_type:
+            return "BUY"
+
+        if "swap" in instruction_type:
+            return "SWAP"
+
+    return "UNKNOWN"
+
+
+# ============================================================
+# FIRST BUY
+# ============================================================
+
+def _detect_first_buy(
+    trade_type: str,
+    token_changes: List[Dict[str, Any]],
+) -> bool:
+    """
+    İlk buy için temel sinyal.
+
+    Gerçek first-buy sıralaması Chain Monitor tarafında
+    Activity Watch içerisinde takip edilecektir.
+
+    Parser burada transaction'ın BUY olduğunu
+    ve token girişini kontrol eder.
+    """
+
+    if trade_type != "BUY":
+        return False
+
     for change in token_changes:
 
         try:
+
             amount = float(
-                change.get("change", 0)
+                change.get(
+                    "change",
+                    0,
+                )
             )
 
         except (
             TypeError,
-            ValueError
+            ValueError,
         ):
+
             continue
 
         if amount > 0:
@@ -503,46 +764,60 @@ def _detect_first_buy(
     return False
 
 
+# ============================================================
+# WHALE BUY
+# ============================================================
+
 def _detect_whale_buy(
-    token_changes,
-    sol_changes,
-):
+    trade_type: str,
+    sol_changes: List[Dict[str, Any]],
+) -> bool:
     """
-    Basit whale sinyali.
+    Conservative whale buy sinyali.
 
-    Şimdilik yüksek değerli token girişleri
-    veya SOL çıkışları üzerinden conservative
-    bir sinyal üretir.
-
-    Eşik ileride config'e taşınabilir.
+    Şimdilik 5 SOL eşik kullanılır.
     """
+
+    if trade_type != "BUY":
+        return False
 
     WHALE_SOL_THRESHOLD = 5.0
 
-    # SOL hareketi
     for change in sol_changes:
 
         try:
+
             sol_change = float(
-                change.get("change_sol", 0)
+                change.get(
+                    "change_sol",
+                    0,
+                )
             )
 
         except (
             TypeError,
-            ValueError
+            ValueError,
         ):
+
             continue
 
+        # Buyer tarafında SOL azalması
         if sol_change <= -WHALE_SOL_THRESHOLD:
             return True
 
     return False
 
 
-def _estimate_amount_sol(sol_changes):
+# ============================================================
+# AMOUNT SOL
+# ============================================================
+
+def _estimate_amount_sol(
+    sol_changes: List[Dict[str, Any]]
+) -> float:
     """
-    Transaction'daki en büyük SOL çıkışını
-    yaklaşık işlem miktarı olarak döndürür.
+    Transaction'daki en büyük SOL hareketini
+    yaklaşık amount olarak döndürür.
 
     Bu kesin swap amount değildir.
     """
@@ -552,19 +827,21 @@ def _estimate_amount_sol(sol_changes):
     for change in sol_changes:
 
         try:
+
             value = abs(
                 float(
                     change.get(
                         "change_sol",
-                        0
+                        0,
                     )
                 )
             )
 
         except (
             TypeError,
-            ValueError
+            ValueError,
         ):
+
             continue
 
         if value > largest:
@@ -574,328 +851,598 @@ def _estimate_amount_sol(sol_changes):
 
 
 # ============================================================
+# TOKEN AMOUNT
+# ============================================================
+
+def _estimate_token_amount(
+    tracked_mint: Optional[str],
+    token_changes: List[Dict[str, Any]],
+) -> float:
+    """
+    Takip edilen mint için toplam pozitif token
+    hareketini hesaplar.
+    """
+
+    if not tracked_mint:
+        return 0.0
+
+    largest_positive = 0.0
+
+    for change in token_changes:
+
+        if change.get(
+            "mint"
+        ) != tracked_mint:
+            continue
+
+        try:
+
+            amount = float(
+                change.get(
+                    "change",
+                    0,
+                )
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+
+            continue
+
+        if amount > largest_positive:
+            largest_positive = amount
+
+    return largest_positive
+
+
+# ============================================================
+# PROGRAM CLASSIFICATION
+# ============================================================
+
+def _classify_program(
+    program_ids: List[str]
+) -> Optional[str]:
+
+    for program_id in program_ids:
+
+        if program_id in PUMP_PROGRAM_IDS:
+            return "pump.fun"
+
+        if program_id in RAYDIUM_PROGRAM_IDS:
+            return "Raydium"
+
+        if program_id in JUPITER_PROGRAM_IDS:
+            return "Jupiter"
+
+    return None
+
+
+# ============================================================
 # MAIN PARSER
 # ============================================================
 
 def parse_transaction(
-    data,
-    tracked_mint=None,
-):
+    data: Dict[str, Any],
+    tracked_mint: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
     """
-    Helius WebSocket transactionSubscribe
-    mesajını parse eder.
-
-    Beklenen yapı:
-
-    data
-      └── params
-           └── result
-                ├── signature
-                ├── slot
-                └── transaction
-                     ├── transaction
-                     │    └── message
-                     └── meta
-    """
-
-    # ========================================================
-    # BASIC VALIDATION
-    # ========================================================
-
-    if not isinstance(data, dict):
-        return None
-
-    params = data.get("params")
-
-    if not isinstance(params, dict):
-        return None
-
-    result = params.get("result")
-
-    if not isinstance(result, dict):
-        return None
-
-    # ========================================================
-    # HELIUS TRANSACTION OBJECT
-    # ========================================================
-
-    tx_container = result.get(
-        "transaction"
-    )
-
-    if not isinstance(tx_container, dict):
-        return None
-
-    transaction = tx_container.get(
-        "transaction"
-    )
-
-    meta = tx_container.get(
-        "meta"
-    )
-
-    if not isinstance(transaction, dict):
-        return None
-
-    if not isinstance(meta, dict):
-        meta = {}
-
-    message = transaction.get(
-        "message"
-    )
-
-    if not isinstance(message, dict):
-        return None
-
-    # ========================================================
-    # BASIC INFO
-    # ========================================================
-
-    signature = result.get(
-        "signature"
-    )
-
-    slot = result.get(
-        "slot"
-    )
-
-    block_time = result.get(
-        "blockTime"
-    )
-
-    if block_time is None:
-        block_time = result.get(
-            "block_time"
-        )
-
-    timestamp = block_time
-
-    if timestamp is None:
-        timestamp = time.time()
-
-    # ========================================================
-    # ACCOUNT KEYS
-    # ========================================================
-
-    account_keys = _extract_account_keys(
-        message
-    )
-
-    # ========================================================
-    # PROGRAMS
-    # ========================================================
-
-    program_ids = _extract_program_ids(
-        message
-    )
-
-    # ========================================================
-    # INSTRUCTIONS
-    # ========================================================
-
-    instructions = _extract_instructions(
-        message
-    )
-
-    # ========================================================
-    # INNER INSTRUCTIONS
-    # ========================================================
-
-    inner_instructions = (
-        _extract_inner_instructions(
-            meta
-        )
-    )
-
-    # ========================================================
-    # LOGS
-    # ========================================================
-
-    logs = _extract_logs(
-        meta
-    )
-
-    # ========================================================
-    # BALANCE CHANGES
-    # ========================================================
-
-    sol_balance_changes = (
-        _extract_sol_balance_changes(
-            meta
-        )
-    )
-
-    token_balance_changes = (
-        _extract_token_balance_changes(
-            meta
-        )
-    )
-
-    # ========================================================
-    # MINT MATCH
-    # ========================================================
-
-    tracked = _mint_present(
-        tracked_mint=tracked_mint,
-        account_keys=account_keys,
-        token_changes=token_balance_changes,
-        instructions=instructions,
-        inner_instructions=inner_instructions,
-    )
-
-    if not tracked:
-        return None
-
-    # ========================================================
-    # DETECTIONS
-    # ========================================================
-
-    dex = _detect_dex(
-        program_ids,
-        logs
-    )
-
-    lp_created = _detect_lp(
-        program_ids,
-        logs
-    )
-
-    first_buy = _detect_first_buy(
-        logs,
-        token_balance_changes
-    )
-
-    whale_buy = _detect_whale_buy(
-        token_balance_changes,
-        sol_balance_changes
-    )
-
-    amount_sol = _estimate_amount_sol(
-        sol_balance_changes
-    )
-
-    # ========================================================
-    # PARSER MATCH LOG
-    # ========================================================
-
-    print("")
-    print("🔬 V5.1 PARSER MATCH")
-    print("-" * 70)
-    print(
-        f"Mint       : {tracked_mint}"
-    )
-    print(
-        f"Signature  : {signature}"
-    )
-    print(
-        f"Slot       : {slot}"
-    )
-    print(
-        f"Programs   : {len(program_ids)}"
-    )
-    print(
-        f"Instructions : {len(instructions)}"
-    )
-    print(
-        f"Inner Instructions : "
-        f"{len(inner_instructions)}"
-    )
-    print(
-        f"LP         : {lp_created}"
-    )
-    print(
-        f"DEX        : {dex}"
-    )
-    print(
-        f"First Buy  : {first_buy}"
-    )
-    print(
-        f"Whale Buy  : {whale_buy}"
-    )
-    print(
-        f"Amount SOL : {amount_sol}"
-    )
-    print("-" * 70)
-
-    # ========================================================
-    # TRANSACTION ANATOMY LOG
-    # ========================================================
-
-    print("")
-    print("🧬 V5.1 TRANSACTION ANATOMY")
-    print("-" * 70)
-
-    print(
-        f"Programs : {program_ids}"
-    )
-
-    print(
-        f"Instructions : "
-        f"{instructions}"
-    )
-
-    print(
-        f"Inner Instructions : "
-        f"{len(inner_instructions)}"
-    )
-
-    print(
-        f"SOL Changes : "
-        f"{sol_balance_changes}"
-    )
-
-    print(
-        f"Token Changes : "
-        f"{token_balance_changes}"
-    )
-
-    print(
-        f"Logs : "
-        f"{logs}"
-    )
-
-    print("-" * 70)
-
-    # ========================================================
-    # FINAL EVENT
-    # ========================================================
-
-    event = {
-        "tracked": True,
-
-        "mint": tracked_mint,
-
-        "signature": signature,
-
-        "slot": slot,
-
-        "timestamp": timestamp,
-
-        "program_ids": program_ids,
-
-        "instructions": instructions,
-
-        "inner_instructions": inner_instructions,
-
-        "sol_balance_changes":
-            sol_balance_changes,
-
-        "token_balance_changes":
-            token_balance_changes,
-
-        "logs": logs,
-
-        "lp_created": lp_created,
-
-        "dex": dex,
-
-        "first_buy": first_buy,
-
-        "whale_buy": whale_buy,
-
-        "amount_sol": amount_sol,
-
-        "raw": data,
+    logsSubscribe + getTransaction uyumlu parser.
+
+    Beklenen data:
+
+    {
+        "params": {
+            "result": {
+                "signature": "...",
+                "transaction": {
+                    "transaction": {...},
+                    "meta": {...}
+                }
+            }
+        }
     }
 
-    return event
+    Ayrıca doğrudan getTransaction sonucu verilmesini
+    de destekler.
+    """
+
+    try:
+
+        if not isinstance(data, dict):
+            return None
+
+        # ====================================================
+        # INPUT NORMALIZATION
+        # ====================================================
+
+        params = data.get(
+            "params"
+        )
+
+        # ----------------------------------------------------
+        # logsSubscribe / wrapper format
+        # ----------------------------------------------------
+
+        if isinstance(params, dict):
+
+            result = params.get(
+                "result"
+            )
+
+            if not isinstance(result, dict):
+                return None
+
+            # logsNotification formatında:
+            #
+            # result
+            #   └── value
+            #        └── signature
+            #
+            # Burada transaction henüz yoktur.
+            #
+            # Bu parser getTransaction verisi bekler.
+
+            if "value" in result:
+                return None
+
+        else:
+
+            result = data.get(
+                "result"
+            )
+
+            if not isinstance(result, dict):
+                result = data
+
+        # ====================================================
+        # TRANSACTION OBJECT
+        # ====================================================
+
+        tx_container = result.get(
+            "transaction"
+        )
+
+        # ----------------------------------------------------
+        # Helius getTransaction / transactionSubscribe
+        # ----------------------------------------------------
+
+        if isinstance(
+            tx_container,
+            dict,
+        ):
+
+            # Helius transactionSubscribe formatı
+            if isinstance(
+                tx_container.get("transaction"),
+                dict,
+            ):
+
+                transaction = (
+                    tx_container
+                    .get("transaction")
+                )
+
+                meta = (
+                    tx_container
+                    .get("meta")
+                )
+
+            # Standart getTransaction formatı
+            elif isinstance(
+                tx_container.get("message"),
+                dict,
+            ):
+
+                transaction = tx_container
+                meta = result.get(
+                    "meta"
+                )
+
+            else:
+
+                return None
+
+        else:
+
+            # Doğrudan transaction object
+            if isinstance(
+                result.get("message"),
+                dict,
+            ):
+
+                transaction = result
+                meta = result.get(
+                    "meta"
+                )
+
+            else:
+
+                return None
+
+        if not isinstance(
+            transaction,
+            dict,
+        ):
+            return None
+
+        if not isinstance(
+            meta,
+            dict,
+        ):
+            meta = {}
+
+        message = transaction.get(
+            "message"
+        )
+
+        if not isinstance(
+            message,
+            dict,
+        ):
+            return None
+
+        # ====================================================
+        # BASIC INFO
+        # ====================================================
+
+        signature = result.get(
+            "signature"
+        )
+
+        slot = result.get(
+            "slot"
+        )
+
+        block_time = result.get(
+            "blockTime"
+        )
+
+        if block_time is None:
+
+            block_time = result.get(
+                "block_time"
+            )
+
+        timestamp = (
+            block_time
+            if block_time is not None
+            else time.time()
+        )
+
+        # ====================================================
+        # ACCOUNT KEYS
+        # ====================================================
+
+        account_keys = (
+            _extract_account_keys(
+                message
+            )
+        )
+
+        # ====================================================
+        # INNER INSTRUCTIONS
+        # ====================================================
+
+        inner_instructions = (
+            _extract_inner_instructions(
+                meta
+            )
+        )
+
+        # ====================================================
+        # PROGRAMS
+        # ====================================================
+
+        program_ids = (
+            _extract_program_ids(
+                message,
+                inner_instructions,
+            )
+        )
+
+        # ====================================================
+        # INSTRUCTIONS
+        # ====================================================
+
+        instructions = (
+            _extract_instructions(
+                message
+            )
+        )
+
+        # ====================================================
+        # LOGS
+        # ====================================================
+
+        logs = _extract_logs(
+            meta
+        )
+
+        # ====================================================
+        # BALANCE CHANGES
+        # ====================================================
+
+        sol_balance_changes = (
+            _extract_sol_balance_changes(
+                meta
+            )
+        )
+
+        token_balance_changes = (
+            _extract_token_balance_changes(
+                meta
+            )
+        )
+
+        # ====================================================
+        # MINT MATCH
+        # ====================================================
+
+        tracked = _mint_present(
+            tracked_mint=tracked_mint,
+            account_keys=account_keys,
+            token_changes=token_balance_changes,
+            instructions=instructions,
+            inner_instructions=inner_instructions,
+            logs=logs,
+        )
+
+        if tracked_mint and not tracked:
+            return None
+
+        # ====================================================
+        # DETECTIONS
+        # ====================================================
+
+        dex = _detect_dex(
+            program_ids,
+            logs,
+        )
+
+        lp_created = _detect_lp(
+            program_ids,
+            logs,
+        )
+
+        trade_type = _detect_trade_type(
+            logs,
+            instructions,
+            inner_instructions,
+        )
+
+        first_buy = _detect_first_buy(
+            trade_type,
+            token_balance_changes,
+        )
+
+        whale_buy = _detect_whale_buy(
+            trade_type,
+            sol_balance_changes,
+        )
+
+        amount_sol = _estimate_amount_sol(
+            sol_balance_changes
+        )
+
+        token_amount = _estimate_token_amount(
+            tracked_mint,
+            token_balance_changes,
+        )
+
+        program = _classify_program(
+            program_ids
+        )
+
+        # ====================================================
+        # PARSER MATCH LOG
+        # ====================================================
+
+        print("")
+        print("=" * 80)
+        print("🔬 V5.1 PARSER MATCH")
+        print("=" * 80)
+
+        print(
+            f"Mint              : {tracked_mint}"
+        )
+
+        print(
+            f"Signature         : {signature}"
+        )
+
+        print(
+            f"Slot              : {slot}"
+        )
+
+        print(
+            f"Program           : {program}"
+        )
+
+        print(
+            f"Programs          : {len(program_ids)}"
+        )
+
+        print(
+            f"Instructions      : "
+            f"{len(instructions)}"
+        )
+
+        print(
+            f"Inner Instructions: "
+            f"{len(inner_instructions)}"
+        )
+
+        print(
+            f"Trade Type        : "
+            f"{trade_type}"
+        )
+
+        print(
+            f"LP                : "
+            f"{lp_created}"
+        )
+
+        print(
+            f"DEX               : "
+            f"{dex}"
+        )
+
+        print(
+            f"First Buy         : "
+            f"{first_buy}"
+        )
+
+        print(
+            f"Whale Buy         : "
+            f"{whale_buy}"
+        )
+
+        print(
+            f"Amount SOL        : "
+            f"{amount_sol}"
+        )
+
+        print(
+            f"Token Amount      : "
+            f"{token_amount}"
+        )
+
+        print("=" * 80)
+
+        # ====================================================
+        # TRANSACTION ANATOMY
+        # ====================================================
+
+        print("")
+        print("🧬 V5.1 TRANSACTION ANATOMY")
+        print("-" * 80)
+
+        print(
+            f"Programs : {program_ids}"
+        )
+
+        print(
+            f"Instructions : {instructions}"
+        )
+
+        print(
+            f"Inner Instructions : "
+            f"{len(inner_instructions)}"
+        )
+
+        print(
+            f"SOL Changes : "
+            f"{sol_balance_changes}"
+        )
+
+        print(
+            f"Token Changes : "
+            f"{token_balance_changes}"
+        )
+
+        print(
+            f"Logs : {logs}"
+        )
+
+        print("-" * 80)
+
+        # ====================================================
+        # FINAL EVENT
+        # ====================================================
+
+        event = {
+            "version": "5.1",
+
+            "network": "mainnet",
+
+            "tracked": tracked,
+
+            "mint": tracked_mint,
+
+            "signature": signature,
+
+            "slot": slot,
+
+            "timestamp": timestamp,
+
+            "type": trade_type,
+
+            "status": (
+                "FAILED"
+                if meta.get("err")
+                else "CONFIRMED"
+            ),
+
+            "program": program,
+
+            "program_ids": program_ids,
+
+            "instructions": instructions,
+
+            "inner_instructions": (
+                inner_instructions
+            ),
+
+            "sol_balance_changes": (
+                sol_balance_changes
+            ),
+
+            "token_balance_changes": (
+                token_balance_changes
+            ),
+
+            "logs": logs,
+
+            "dex": dex,
+
+            "lp_created": lp_created,
+
+            "first_buy": first_buy,
+
+            "whale_buy": whale_buy,
+
+            "amount_sol": amount_sol,
+
+            "token_amount": token_amount,
+
+            "buyer": None,
+
+            "seller": None,
+
+            "creator": None,
+
+            "analysis": {
+                "engine": "Patoshi Radar",
+                "version": "5.1",
+                "program": program,
+                "instruction": trade_type,
+                "score": 0,
+                "confidence": 0,
+                "matched": [],
+                "reason": [],
+                "warnings": [],
+                "errors": [],
+            },
+
+            "raw": data,
+        }
+
+        return event
+
+    except Exception as exc:
+
+        print(
+            "❌ V5.1 Transaction Parser Hatası"
+        )
+
+        print(
+            f"Type: {type(exc).__name__}"
+        )
+
+        print(
+            f"Error: {exc}"
+        )
+
+        return None
