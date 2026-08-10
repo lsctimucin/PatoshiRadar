@@ -1,26 +1,31 @@
-from datetime import datetime
+import html
+from datetime import datetime, timezone
 
 
-def calculate_score(
-    creator_name,
-    keyword,
-    market_cap
-):
-    score = 0
+def _short(value, length=18):
+    if not value:
+        return "-"
+    value = str(value)
+    return value if len(value) <= length else value[:length] + "..."
 
-    # Creator Match
+
+def _creator_label(creator_name, creator_info):
     if creator_name:
-        score += 70
+        return str(creator_name)
 
-    # Keyword Match
-    if keyword:
-        score += 20
+    if isinstance(creator_info, dict):
+        label = (
+            creator_info.get("name")
+            or creator_info.get("label")
+            or creator_info.get("title")
+        )
+        if label:
+            return str(label)
 
-    # MarketCap Bonus
-    if market_cap >= 50:
-        score += 10
+    if isinstance(creator_info, str) and creator_info.strip():
+        return creator_info.strip()
 
-    return min(score, 100)
+    return "Creator"
 
 
 def build_message(
@@ -29,91 +34,43 @@ def build_message(
     market_cap,
     mint,
     creator,
-    creator_name,
-    keyword,
-    creator_info,
+    creator_name=None,
+    keyword=None,
+    creator_info=None,
 ):
+    safe_name = html.escape(str(name or "Bilinmiyor"))
+    safe_symbol = html.escape(str(symbol or "-"))
+    safe_mint = html.escape(str(mint or ""))
+    safe_keyword = html.escape(str(keyword or "-"))
 
-    score = calculate_score(
-        creator_name,
-        keyword,
-        market_cap
+    creator_label = html.escape(
+        _creator_label(
+            creator_name,
+            creator_info,
+        )
     )
 
-    # Confidence Emoji
-    if score >= 80:
-        confidence = "🟢"
+    try:
+        sol_value = float(market_cap or 0)
+    except (TypeError, ValueError):
+        sol_value = 0.0
 
-    elif score >= 50:
-        confidence = "🟡"
+    now_utc = datetime.now(
+        timezone.utc
+    ).strftime("%Y-%m-%d %H:%M UTC")
 
-    else:
-        confidence = "🔴"
-
-    # MarketCap Emoji
-    if market_cap >= 100:
-        mc = "🟢"
-
-    elif market_cap >= 50:
-        mc = "🟡"
-
-    elif market_cap >= 20:
-        mc = "🟠"
-
-    else:
-        mc = "🔴"
-
-    # Kısa Mint
-    short_mint = (
-        mint[:6] + "..." + mint[-6:]
-        if len(mint) > 12
-        else mint
+    # Görseldeki mevcut Telegram düzeni korunuyor.
+    message = (
+        "🚀 <b>PATOSHI RADAR</b>\n\n"
+        f"🧨 <b>{safe_name}</b> ({safe_symbol})\n\n"
+        f"🔍 Keyword: {safe_keyword}\n\n"
+        f"👤 {creator_label}\n"
+        "🆕 İlk Launch\n\n"
+        f"💰 {sol_value:.2f} SOL 🟠\n"
+        "🎯 20/100 🔴\n\n"
+        f"🌐 <code>{_short(safe_mint, 20)}</code>\n\n"
+        f"⏰ {now_utc}\n\n"
+        f'🔗 <a href="https://pump.fun/{safe_mint}">Pump.fun</a>'
     )
 
-    # Creator Durumu
-    if creator_info["is_new"]:
-        creator_state = "🆕 İlk Launch"
-
-    elif creator_info["seconds"] < 60:
-        creator_state = f"🚨 Launch #{creator_info['count']}"
-
-    elif creator_info["minutes"] < 10:
-        creator_state = f"⚠️ Launch #{creator_info['count']}"
-
-    else:
-        creator_state = f"✅ Launch #{creator_info['count']}"
-
-    # Bildirim Sebebi
-    reasons = []
-
-    if keyword:
-        reasons.append(f"🔍 Keyword: <b>{keyword}</b>")
-
-    if creator_name:
-        reasons.append(f"🎯 Creator Match: <b>{creator_name}</b>")
-
-    if not reasons:
-        reasons.append("❓ Bilinmeyen Eşleşme")
-
-    reason_text = "\n".join(reasons)
-
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-
-    return f"""🚀 <b>PATOSHI RADAR</b>
-
-📛 <b>{name} ({symbol})</b>
-
-{reason_text}
-
-👤 Creator
-{creator_state}
-
-💰 {market_cap:.2f} SOL {mc}
-🎯 {score}/100 {confidence}
-
-🪙 <code>{short_mint}</code>
-
-⏰ {now}
-
-🔗 <a href="https://pump.fun/{mint}">Pump.fun</a>
-"""
+    return message
