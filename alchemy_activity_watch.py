@@ -1,31 +1,27 @@
 # ============================================================
 # PATOSHI RADAR V5.1
-# ALCHEMY ACTIVITY WATCH
+# ALCHEMY ACTIVITY WATCH - HTTP/RPC FINAL
 # ============================================================
 #
-# AKIŞ:
-#
+# Akış:
 # PumpPortal
 #     ↓
-# Telegram alarmı
+# Telegram hemen
 #     ↓
-# add_token(mint)
+# add_token()
 #     ↓
-# Alchemy HTTP Activity Watch
+# Alchemy HTTP getSignaturesForAddress
 #     ↓
-# 60 saniye izle
+# getTransaction
 #     ↓
-# Transaction tespiti
+# 60 saniye
 #     ↓
-# LP / DEX / SWAP / BUY tespiti
-#
-# NOT:
-# Bu sürüm Alchemy logsSubscribe KULLANMAZ.
-# HTTP polling kullanır.
+# LP / DEX / First Buy
+#     ↓
+# Telegram ikinci mesaj
 #
 # ENV:
 # ALCHEMY_API_KEY
-#
 # ============================================================
 
 import os
@@ -35,33 +31,21 @@ import threading
 import requests
 
 
-# ============================================================
-# CONFIG
-# ============================================================
-
 ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY", "").strip()
 
-HTTP_URL = (
+RPC_URL = (
     f"https://solana-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}"
 )
 
 WATCH_SECONDS = 60
-
-# Her kaç saniyede bir yeni signature kontrol edilecek.
-POLL_SECONDS = 3
-
-# Tek token için maksimum incelenecek yeni transaction.
-MAX_SIGNATURES_PER_CHECK = 10
-
-# Aynı anda maksimum watch.
-MAX_WATCHES = 100
-
+POLL_SECONDS = 5
+MAX_WATCHES = 25
+SIGNATURE_LIMIT = 20
 HTTP_TIMEOUT = 10
 
+# Bilinen Raydium AMM programı.
+RAYDIUM_PROGRAM_ID = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
 
-# ============================================================
-# KEYWORDS
-# ============================================================
 
 LP_KEYWORDS = [
     "initialize",
@@ -71,10 +55,7 @@ LP_KEYWORDS = [
     "add_liquidity",
     "liquidity",
     "pool",
-    "migrate",
-    "migration",
 ]
-
 
 DEX_KEYWORDS = [
     "raydium",
@@ -86,7 +67,6 @@ DEX_KEYWORDS = [
     "route",
 ]
 
-
 BUY_KEYWORDS = [
     "buy",
     "swap",
@@ -94,167 +74,55 @@ BUY_KEYWORDS = [
     "exact_sol_for_tokens",
 ]
 
-
-# ============================================================
-# STATE
-# ============================================================
-
 watch_tokens = {}
-
-watch_lock = threading.Lock()
+watch_lock = threading.RLock()
 
 running = False
-
 worker_thread = None
 
-cleanup_thread = None
+_result_callback = None
+request_id = 1000
+request_lock = threading.Lock()
 
-
-# ============================================================
-# LOG
-# ============================================================
 
 def log(message):
     print(message, flush=True)
 
 
-# ============================================================
-# ADD TOKEN
-# ============================================================
-
-def add_token(
-    mint,
-    name="",
-    symbol="",
-    creator="",
-):
-    """
-    V5.1 Activity Watch başlatır.
-
-    app.py tarafından:
-
-        add_token(
-            mint,
-            name,
-            symbol,
-            creator
-        )
-    """
-
-    if not mint:
-        log("⚠️ ALCHEMY ADD_TOKEN => mint boş.")
-        return False
-
-    now = time.time()
-
-    with watch_lock:
-
-        if mint in watch_tokens:
-            log(
-                "⚠️ ALCHEMY WATCH zaten aktif => "
-                f"{mint}"
-            )
-            return True
-
-        if len(watch_tokens) >= MAX_WATCHES:
-
-            log(
-                "⚠️ ALCHEMY WATCH LIMIT => "
-                f"MAX={MAX_WATCHES}"
-            )
-
-            return False
-
-        watch_tokens[mint] = {
-            "mint": mint,
-            "name": name,
-            "symbol": symbol,
-            "creator": creator,
-
-            "started_at": now,
-            "expires_at": now + WATCH_SECONDS,
-
-            "seen_signatures": set(),
-
-            "lp_detected": False,
-            "dex_detected": False,
-            "buy_detected": False,
-
-            "first_event_signature": None,
-            "transaction_count": 0,
-        }
-
-    log(
-        "👁️ ALCHEMY ACTIVITY WATCH BAŞLADI => "
-        f"{mint} | {WATCH_SECONDS}s"
-    )
-
-    log(
-        "🧩 V5.1 ALCHEMY WATCH ADD_TOKEN => "
-        f"{mint} | result=True"
-    )
-
-    return True
+def next_request_id():
+    global request_id
+    with request_lock:
+        request_id += 1
+        return request_id
 
 
-# ============================================================
-# REMOVE TOKEN
-# ============================================================
-
-def remove_token(mint):
-
-    with watch_lock:
-
-        item = watch_tokens.pop(mint, None)
-
-    if not item:
-        return
-
-    log(
-        "🧹 ALCHEMY WATCH SONLANDI => "
-        f"{mint}"
-    )
+def set_result_callback(callback):
+    global _result_callback
+    _result_callback = callback
+    log("🧩 V5.1 ALCHEMY RESULT CALLBACK HAZIR.")
 
 
-# ============================================================
-# ALCHEMY RPC
-# ============================================================
-
-def rpc_request(
-    method,
-    params,
-):
-
+def _rpc(method, params):
     if not ALCHEMY_API_KEY:
-
-        log(
-            "❌ ALCHEMY_API_KEY bulunamadı."
-        )
-
+        log("❌ ALCHEMY_API_KEY bulunamadı.")
         return None
 
     payload = {
         "jsonrpc": "2.0",
-        "id": int(time.time() * 1000),
+        "id": next_request_id(),
         "method": method,
         "params": params,
     }
 
     try:
-
         response = requests.post(
-            HTTP_URL,
+            RPC_URL,
             json=payload,
             timeout=HTTP_TIMEOUT,
         )
 
         if response.status_code == 429:
-
-            log(
-                "⚠️ ALCHEMY HTTP RATE LIMIT => "
-                f"method={method}"
-            )
-
+            log(f"⚠️ ALCHEMY HTTP RATE LIMIT => {method}")
             return None
 
         response.raise_for_status()
@@ -262,58 +130,183 @@ def rpc_request(
         data = response.json()
 
         if "error" in data:
-
             log(
-                "❌ V5.1 ALCHEMY RPC ERROR => "
-                f"{data['error']}"
+                f"❌ V5.1 ALCHEMY RPC ERROR => "
+                f"{data.get('error')}"
             )
-
             return None
 
         return data.get("result")
 
-    except Exception as e:
-
+    except requests.RequestException as exc:
         log(
-            "⚠️ V5.1 ALCHEMY RPC REQUEST ERROR => "
-            f"{method} | {e}"
+            f"⚠️ V5.1 ALCHEMY HTTP ERROR => "
+            f"{method} | {exc}"
         )
-
+        return None
+    except Exception as exc:
+        log(
+            f"⚠️ V5.1 ALCHEMY RPC PARSE ERROR => "
+            f"{method} | {exc}"
+        )
         return None
 
 
-# ============================================================
-# GET SIGNATURES
-# ============================================================
+def _collect_strings(value, result=None):
+    if result is None:
+        result = []
 
-def get_signatures(mint):
+    if isinstance(value, str):
+        result.append(value.lower())
 
-    result = rpc_request(
+    elif isinstance(value, dict):
+        for item in value.values():
+            _collect_strings(item, result)
+
+    elif isinstance(value, list):
+        for item in value:
+            _collect_strings(item, result)
+
+    return result
+
+
+def _transaction_text(tx):
+    strings = _collect_strings(tx)
+    return " ".join(strings)
+
+
+def _extract_program_ids(tx):
+    program_ids = set()
+
+    try:
+        message = (
+            tx.get("transaction", {})
+            .get("message", {})
+        )
+
+        for ix in message.get("instructions", []) or []:
+            if not isinstance(ix, dict):
+                continue
+
+            program_id = ix.get("programId")
+            if program_id:
+                program_ids.add(str(program_id))
+
+        meta = tx.get("meta") or {}
+        inner_groups = meta.get("innerInstructions") or []
+
+        for group in inner_groups:
+            for ix in group.get("instructions", []) or []:
+                if not isinstance(ix, dict):
+                    continue
+
+                program_id = ix.get("programId")
+                if program_id:
+                    program_ids.add(str(program_id))
+
+    except Exception:
+        pass
+
+    return program_ids
+
+
+def _detect_dex(tx, text):
+    text_lower = text.lower()
+
+    if "raydium" in text_lower:
+        return "Raydium"
+
+    if RAYDIUM_PROGRAM_ID.lower() in text_lower:
+        return "Raydium"
+
+    if "pumpswap" in text_lower or "pump swap" in text_lower:
+        return "PumpSwap"
+
+    program_ids = {
+        value.lower()
+        for value in _extract_program_ids(tx)
+    }
+
+    if RAYDIUM_PROGRAM_ID.lower() in program_ids:
+        return "Raydium"
+
+    if any(
+        keyword in text_lower
+        for keyword in ("amm", "cpmm", "route", "swap")
+    ):
+        return "DEX"
+
+    return None
+
+
+def _detect_event(tx):
+    text = _transaction_text(tx)
+
+    lp_detected = any(
+        keyword in text
+        for keyword in LP_KEYWORDS
+    )
+
+    dex_name = _detect_dex(tx, text)
+
+    dex_detected = dex_name is not None
+
+    buy_detected = any(
+        keyword in text
+        for keyword in BUY_KEYWORDS
+    )
+
+    # Parsed instruction kontrolü.
+    try:
+        message = (
+            tx.get("transaction", {})
+            .get("message", {})
+        )
+
+        for ix in message.get("instructions", []) or []:
+            if not isinstance(ix, dict):
+                continue
+
+            parsed = ix.get("parsed")
+            if isinstance(parsed, dict):
+                ix_type = str(
+                    parsed.get("type", "")
+                ).lower()
+
+                if ix_type == "swap":
+                    buy_detected = True
+
+    except Exception:
+        pass
+
+    return {
+        "lp_detected": lp_detected,
+        "dex_detected": dex_detected,
+        "dex_name": dex_name,
+        "buy_detected": buy_detected,
+    }
+
+
+def _get_signatures(mint):
+    result = _rpc(
         "getSignaturesForAddress",
         [
             mint,
             {
-                "limit": MAX_SIGNATURES_PER_CHECK,
+                "limit": SIGNATURE_LIMIT,
+                "commitment": "confirmed",
             },
         ],
     )
 
-    if not result:
+    if not isinstance(result, list):
         return []
 
     return result
 
 
-# ============================================================
-# GET TRANSACTION
-# ============================================================
-
-def get_transaction(signature):
-
-    if not signature:
-        return None
-
-    result = rpc_request(
+def _get_transaction(signature):
+    return _rpc(
         "getTransaction",
         [
             signature,
@@ -325,628 +318,336 @@ def get_transaction(signature):
         ],
     )
 
-    return result
 
+def add_token(
+    mint,
+    name="",
+    symbol="",
+    creator="",
+    launch_signature="",
+):
+    if not mint:
+        return False
 
-# ============================================================
-# TEXT NORMALIZER
-# ============================================================
+    mint = str(mint).strip()
 
-def normalize_text(value):
-
-    if value is None:
-        return ""
-
-    if isinstance(value, str):
-        return value.lower()
-
-    try:
-
-        return json.dumps(
-            value,
-            ensure_ascii=False,
-        ).lower()
-
-    except Exception:
-
-        return str(value).lower()
-
-
-# ============================================================
-# TRANSACTION TEXT
-# ============================================================
-
-def transaction_text(tx):
-
-    if not tx:
-        return ""
-
-    parts = []
-
-    # --------------------------------------------------------
-    # LOGS
-    # --------------------------------------------------------
-
-    meta = tx.get("meta") or {}
-
-    logs = meta.get("logMessages") or []
-
-    parts.extend(
-        str(x)
-        for x in logs
-    )
-
-    # --------------------------------------------------------
-    # TRANSACTION
-    # --------------------------------------------------------
-
-    transaction = tx.get(
-        "transaction"
-    ) or {}
-
-    message = transaction.get(
-        "message"
-    ) or {}
-
-    instructions = message.get(
-        "instructions"
-    ) or []
-
-    for instruction in instructions:
-
-        parts.append(
-            normalize_text(
-                instruction
+    with watch_lock:
+        if mint in watch_tokens:
+            log(
+                f"⏩ V5.1 ALCHEMY ZATEN İZLENİYOR => {mint}"
             )
-        )
+            return False
 
-    # --------------------------------------------------------
-    # ACCOUNT KEYS
-    # --------------------------------------------------------
-
-    account_keys = message.get(
-        "accountKeys"
-    ) or []
-
-    for account in account_keys:
-
-        parts.append(
-            normalize_text(
-                account
+        if len(watch_tokens) >= MAX_WATCHES:
+            log(
+                f"⚠️ V5.1 ALCHEMY WATCH LIMIT => "
+                f"MAX={MAX_WATCHES}"
             )
-        )
-
-    return " ".join(parts).lower()
-
-
-# ============================================================
-# DETECT LP
-# ============================================================
-
-def detect_lp(
-    mint,
-    signature,
-    text,
-):
-
-    if not text:
-        return False
-
-    hit = any(
-        keyword in text
-        for keyword in LP_KEYWORDS
-    )
-
-    if not hit:
-        return False
-
-    with watch_lock:
-
-        item = watch_tokens.get(
-            mint
-        )
-
-        if not item:
             return False
 
-        if item["lp_detected"]:
-            return False
+        now = time.time()
 
-        item["lp_detected"] = True
+        watch_tokens[mint] = {
+            "mint": mint,
+            "name": name,
+            "symbol": symbol,
+            "creator": creator,
+            "launch_signature": launch_signature,
+            "started_at": now,
+            "expires_at": now + WATCH_SECONDS,
+            "seen_signatures": set(),
+            "event_count": 0,
+            "lp_detected": False,
+            "dex_detected": False,
+            "dex_name": None,
+            "buy_detected": False,
+            "first_buy_signature": None,
+            "lp_signature": None,
+            "dex_signature": None,
+        }
 
     log(
-        "💧 V5.1 ALCHEMY LP DETECTED => "
-        f"{mint} | tx={signature}"
+        f"👁️ ALCHEMY ACTIVITY WATCH BAŞLADI => "
+        f"{mint} | {WATCH_SECONDS}s"
     )
 
     return True
 
 
-# ============================================================
-# DETECT DEX
-# ============================================================
-
-def detect_dex(
-    mint,
-    signature,
-    text,
-):
-
-    if not text:
-        return False
-
-    hit = any(
-        keyword in text
-        for keyword in DEX_KEYWORDS
-    )
-
-    if not hit:
-        return False
-
-    with watch_lock:
-
-        item = watch_tokens.get(
-            mint
-        )
-
-        if not item:
-            return False
-
-        if item["dex_detected"]:
-            return False
-
-        item["dex_detected"] = True
-
-    log(
-        "🏦 V5.1 ALCHEMY DEX DETECTED => "
-        f"{mint} | tx={signature}"
-    )
-
-    return True
-
-
-# ============================================================
-# DETECT BUY / SWAP
-# ============================================================
-
-def detect_buy(
-    mint,
-    signature,
-    text,
-):
-
-    if not text:
-        return False
-
-    hit = any(
-        keyword in text
-        for keyword in BUY_KEYWORDS
-    )
-
-    if not hit:
-        return False
-
-    with watch_lock:
-
-        item = watch_tokens.get(
-            mint
-        )
-
-        if not item:
-            return False
-
-        if item["buy_detected"]:
-            return False
-
-        item["buy_detected"] = True
-
-    log(
-        "🟢 V5.1 ALCHEMY FIRST BUY/SWAP "
-        f"DETECTED => {mint} | tx={signature}"
-    )
-
-    return True
-
-
-# ============================================================
-# TRANSACTION ANALYSIS
-# ============================================================
-
-def analyze_transaction(
-    mint,
-    signature,
-):
-
-    tx = get_transaction(
-        signature
-    )
-
-    if not tx:
-
-        return
-
-    with watch_lock:
-
-        item = watch_tokens.get(
-            mint
-        )
-
-        if not item:
-            return
-
-        item["transaction_count"] += 1
-
-        if item["first_event_signature"] is None:
-
-            item[
-                "first_event_signature"
-            ] = signature
-
-    log(
-        "⚡ V5.1 ALCHEMY EVENT => "
-        f"{mint} | tx={signature}"
-    )
-
-    text = transaction_text(
-        tx
-    )
-
-    if not text:
-        return
-
-    # --------------------------------------------------------
-    # LP
-    # --------------------------------------------------------
-
-    detect_lp(
-        mint,
-        signature,
-        text,
-    )
-
-    # --------------------------------------------------------
-    # DEX
-    # --------------------------------------------------------
-
-    detect_dex(
-        mint,
-        signature,
-        text,
-    )
-
-    # --------------------------------------------------------
-    # BUY / SWAP
-    # --------------------------------------------------------
-
-    detect_buy(
-        mint,
-        signature,
-        text,
-    )
-
-    # --------------------------------------------------------
-    # TOKEN BALANCES
-    # --------------------------------------------------------
-
-    meta = tx.get(
-        "meta"
-    ) or {}
-
-    pre_balances = (
-        meta.get(
-            "preTokenBalances"
-        )
-        or []
-    )
-
-    post_balances = (
-        meta.get(
-            "postTokenBalances"
-        )
-        or []
-    )
-
-    if (
-        pre_balances
-        or post_balances
-    ):
-
-        log(
-            "🪙 V5.1 TOKEN BALANCE DATA => "
-            f"{mint}"
-        )
-
-    # --------------------------------------------------------
-    # ERROR
-    # --------------------------------------------------------
-
-    tx_error = meta.get(
-        "err"
-    )
-
-    if tx_error:
-
-        log(
-            "⚠️ V5.1 TRANSACTION ERROR => "
-            f"{mint} | tx={signature} | "
-            f"err={tx_error}"
-        )
-
-
-# ============================================================
-# POLL TOKEN
-# ============================================================
-
-def poll_token(mint):
-
-    signatures = get_signatures(
-        mint
-    )
+def _process_watch(mint, item):
+    signatures = _get_signatures(mint)
 
     if not signatures:
         return
 
-    for signature_data in reversed(
-        signatures
-    ):
-
-        if not isinstance(
-            signature_data,
-            dict,
-        ):
+    for entry in reversed(signatures):
+        if not isinstance(entry, dict):
             continue
 
-        signature = signature_data.get(
-            "signature"
-        )
-
+        signature = entry.get("signature")
         if not signature:
             continue
 
         with watch_lock:
+            current = watch_tokens.get(mint)
 
-            item = watch_tokens.get(
-                mint
-            )
-
-            if not item:
+            if current is None:
                 return
 
-            if signature in item[
-                "seen_signatures"
-            ]:
+            if time.time() >= current["expires_at"]:
+                return
+
+            if signature in current["seen_signatures"]:
                 continue
 
-            item[
-                "seen_signatures"
-            ].add(
-                signature
+            current["seen_signatures"].add(signature)
+
+            # PumpPortal launch transactionını analiz etmiyoruz.
+            if (
+                current.get("launch_signature")
+                and signature == current["launch_signature"]
+            ):
+                continue
+
+        tx = _get_transaction(signature)
+
+        if not tx:
+            continue
+
+        event = _detect_event(tx)
+
+        if not any(event.values()):
+            continue
+
+        with watch_lock:
+            current = watch_tokens.get(mint)
+
+            if current is None:
+                return
+
+            current["event_count"] += 1
+
+            if event["lp_detected"] and not current["lp_detected"]:
+                current["lp_detected"] = True
+                current["lp_signature"] = signature
+
+                log(
+                    f"💧 V5.1 ALCHEMY LP DETECTED => "
+                    f"{mint} | tx={signature}"
+                )
+
+            if event["dex_detected"] and not current["dex_detected"]:
+                current["dex_detected"] = True
+                current["dex_name"] = event["dex_name"]
+                current["dex_signature"] = signature
+
+                log(
+                    f"🏛️ V5.1 ALCHEMY DEX DETECTED => "
+                    f"{mint} | DEX={event['dex_name']} | "
+                    f"tx={signature}"
+                )
+
+            if event["buy_detected"] and not current["buy_detected"]:
+                current["buy_detected"] = True
+                current["first_buy_signature"] = signature
+
+                log(
+                    f"🛒 V5.1 ALCHEMY FIRST BUY DETECTED => "
+                    f"{mint} | tx={signature}"
+                )
+
+            log(
+                f"⚡ V5.1 ALCHEMY EVENT => {mint} | "
+                f"tx={signature} | "
+                f"LP={current['lp_detected']} | "
+                f"DEX={current['dex_detected']} | "
+                f"BUY={current['buy_detected']}"
             )
 
-        log(
-            "🔎 V5.1 ALCHEMY TX BULUNDU => "
-            f"{mint} | tx={signature}"
-        )
+        # Üçünün de bulunması halinde daha fazla RPC harcamıyoruz.
+        with watch_lock:
+            current = watch_tokens.get(mint)
+            if current is None:
+                return
 
-        analyze_transaction(
-            mint,
-            signature,
-        )
+            complete = (
+                current["lp_detected"]
+                and current["dex_detected"]
+                and current["buy_detected"]
+            )
+
+        if complete:
+            log(
+                f"🎯 V5.1 ALCHEMY TÜM SİNYALLER BULUNDU => {mint}"
+            )
+            _finish_token(mint, early=True)
+            return
 
 
-# ============================================================
-# ACTIVITY WATCH LOOP
-# ============================================================
+def _finish_token(mint, early=False):
+    with watch_lock:
+        item = watch_tokens.pop(mint, None)
 
-def activity_watch_loop():
-
-    log(
-        "🚀 V5.1 ALCHEMY ACTIVITY WATCH "
-        "BAŞLATILIYOR..."
-    )
-
-    if not ALCHEMY_API_KEY:
-
-        log(
-            "❌ ALCHEMY_API_KEY bulunamadı."
-        )
-
+    if item is None:
         return
 
+    elapsed = max(
+        0,
+        int(time.time() - item["started_at"])
+    )
+
+    result = {
+        "mint": item["mint"],
+        "name": item["name"],
+        "symbol": item["symbol"],
+        "creator": item["creator"],
+        "lp_detected": item["lp_detected"],
+        "dex_detected": item["dex_detected"],
+        "dex_name": item["dex_name"],
+        "buy_detected": item["buy_detected"],
+        "first_buy_signature": item["first_buy_signature"],
+        "lp_signature": item["lp_signature"],
+        "dex_signature": item["dex_signature"],
+        "event_count": item["event_count"],
+        "elapsed_seconds": elapsed,
+        "early": early,
+    }
+
     log(
-        "🌐 V5.1 ALCHEMY HTTP ACTIVITY WATCH AKTİF"
+        f"📊 V5.1 ALCHEMY WATCH ÖZET => "
+        f"{mint} | "
+        f"LP={result['lp_detected']} | "
+        f"DEX={result['dex_detected']} | "
+        f"BUY={result['buy_detected']} | "
+        f"events={result['event_count']}"
+    )
+
+    callback = _result_callback
+
+    if callback:
+        try:
+            callback(result)
+        except Exception as exc:
+            log(
+                f"❌ V5.1 ALCHEMY RESULT CALLBACK ERROR => {exc}"
+            )
+
+
+def cleanup_loop():
+    while running:
+        try:
+            now = time.time()
+            expired = []
+
+            with watch_lock:
+                for mint, item in list(
+                    watch_tokens.items()
+                ):
+                    if now >= item["expires_at"]:
+                        expired.append(mint)
+
+            for mint in expired:
+                _finish_token(mint, early=False)
+
+            time.sleep(1)
+
+        except Exception as exc:
+            log(
+                f"❌ V5.1 ALCHEMY CLEANUP ERROR => {exc}"
+            )
+            time.sleep(2)
+
+
+def worker_loop():
+    log(
+        "🚀 V5.1 ALCHEMY HTTP ACTIVITY WATCH BAŞLATILIYOR..."
     )
 
     while running:
-
-        with watch_lock:
-
-            active_tokens = list(
-                watch_tokens.keys()
-            )
-
-        for mint in active_tokens:
-
+        try:
             with watch_lock:
-
-                item = watch_tokens.get(
-                    mint
+                snapshot = list(
+                    watch_tokens.items()
                 )
 
-                if not item:
+            for mint, item in snapshot:
+                if time.time() >= item["expires_at"]:
+                    _finish_token(mint, early=False)
                     continue
 
-                if time.time() >= item[
-                    "expires_at"
-                ]:
+                _process_watch(mint, item)
 
-                    continue
+            time.sleep(POLL_SECONDS)
 
-            try:
-
-                poll_token(
-                    mint
-                )
-
-            except Exception as e:
-
-                log(
-                    "⚠️ V5.1 ALCHEMY WATCH ERROR => "
-                    f"{mint} | {e}"
-                )
-
-        time.sleep(
-            POLL_SECONDS
-        )
-
-
-# ============================================================
-# CLEANUP LOOP
-# ============================================================
-
-def cleanup_loop():
-
-    while running:
-
-        now = time.time()
-
-        expired = []
-
-        with watch_lock:
-
-            for mint, item in list(
-                watch_tokens.items()
-            ):
-
-                if now >= item[
-                    "expires_at"
-                ]:
-
-                    expired.append(
-                        mint
-                    )
-
-        for mint in expired:
-
-            with watch_lock:
-
-                item = watch_tokens.get(
-                    mint
-                )
-
-            if item:
-
-                log(
-                    "📊 V5.1 ALCHEMY WATCH ÖZET => "
-                    f"{mint} | "
-                    f"tx={item['transaction_count']} | "
-                    f"LP={item['lp_detected']} | "
-                    f"DEX={item['dex_detected']} | "
-                    f"BUY={item['buy_detected']}"
-                )
-
-            remove_token(
-                mint
+        except Exception as exc:
+            log(
+                f"❌ V5.1 ALCHEMY WORKER ERROR => {exc}"
             )
+            time.sleep(2)
 
-        time.sleep(
-            2
-        )
-
-
-# ============================================================
-# START
-# ============================================================
 
 def start():
-
     global running
     global worker_thread
-    global cleanup_thread
 
     if running:
-
         log(
-            "⚠️ ALCHEMY ACTIVITY WATCH "
-            "zaten aktif."
+            "⚠️ V5.1 ALCHEMY ACTIVITY WATCH zaten aktif."
         )
+        return
 
+    if not ALCHEMY_API_KEY:
+        log(
+            "❌ ALCHEMY_API_KEY bulunamadı. "
+            "Activity Watch başlatılmadı."
+        )
         return
 
     running = True
 
+    log(
+        "📡 V5.1 ALCHEMY HTTP ACTIVITY WATCH AKTİF"
+    )
+
     worker_thread = threading.Thread(
-        target=activity_watch_loop,
+        target=worker_loop,
         daemon=True,
         name="AlchemyActivityWatch",
     )
-
     worker_thread.start()
 
-    cleanup_thread = threading.Thread(
+    threading.Thread(
         target=cleanup_loop,
         daemon=True,
         name="AlchemyActivityCleanup",
-    )
+    ).start()
 
-    cleanup_thread.start()
-
-
-# ============================================================
-# STOP
-# ============================================================
 
 def stop():
-
     global running
-
     running = False
 
     log(
-        "🛑 V5.1 ALCHEMY ACTIVITY WATCH "
-        "DURDURULDU."
+        "🛑 V5.1 ALCHEMY ACTIVITY WATCH DURDURULDU."
     )
 
 
-# ============================================================
-# STATUS
-# ============================================================
-
 def status():
-
     with watch_lock:
-
         result = {}
 
         for mint, item in watch_tokens.items():
-
-            copy_item = dict(
-                item
+            copied = dict(item)
+            copied["seen_signatures"] = len(
+                item["seen_signatures"]
             )
-
-            copy_item[
-                "seen_signatures"
-            ] = len(
-                item[
-                    "seen_signatures"
-                ]
-            )
-
-            result[mint] = copy_item
+            result[mint] = copied
 
         return result
 
 
-# ============================================================
-# DIRECT TEST
-# ============================================================
-
 if __name__ == "__main__":
-
     start()
 
     while True:
-
-        time.sleep(
-            10
-        )
+        time.sleep(10)
