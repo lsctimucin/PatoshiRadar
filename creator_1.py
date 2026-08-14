@@ -38,7 +38,6 @@ TARGET_CREATORS = {
     "Patoshi Team": "BEhztgiG43bDju9jQrXmg38ugA4PJNkKhbRJboEz8x3i",
     "Patoshi Team": "7fzr188oQEhdBrG3LiRcZfyHKNrFMty8sX5xetkqmsxB",
     "Patoshi Team": "BhwuB5KYbEgDLHYwCGdet3TcUipjxExDQK3hDqtd78Qv",
-    "Patoshi Team": "B9D2m5ghdPC9WJXw98cie3mzrLTDM1NaHkJwWRdNnGVx",
     "Patoshi Team": "5pnxeMsdVHy94nXwHHrUZnGYTkE8NDb6hvpVEgvxNgzm"
     
     
