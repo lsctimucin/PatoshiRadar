@@ -1,50 +1,45 @@
-# Takip edilecek creator cüzdanları
-
+# Patoshi Radar - Creator Wallet Tracking
+#
+# Her wallet benzersiz bir key ile tutulur.
+# Böylece Python dictionary duplicate-key problemi oluşmaz.
+#
 TARGET_CREATORS = {
-    "Patoshi Team": "GVyByLjvURtf1wyNkfyJbQGrnjNo8uhAH7J6u197Cpap",
-    "Patoshi Team": "J8x8BFQrQe6xSwXEhmJFXmkkiMQ54N71ZQ5bmL9sFs4b",
-    "Patoshi Team": "7XJhvpp9X16Ynx2tgbQVH7exL6PTZLkEA6FxdpFYwebX",
-    "Patoshi Team": "Fe74jVetvQfqZ6J1xMNPpZ5SGQJUFxTyydPEyAk16pGR",
-    "Patoshi Team": "DSxyPrKxaDxeEJZ4Nb8cx8qsRNexw1W6UHmvqgEAA4hq",
-    "Patoshi Team": "GVyBRxSMpZEyzb3Cj2QiF9fRxV9xtgCUtz9vQ7fSCpap",
-    "Patoshi Team": "9nUNwTjTZASbbK9cigF7WKbo16oQ97uDG5kb38j4nd8H",
-    "Patoshi Team": "C68a6RCGLiPskbPYtAcsCjhG8tfTWYcoB4JjCrXFdqyo",
-    "Patoshi Team": "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9",
-    "Patoshi Team": "B9D2m5ghdPC9WJXw98cie3mzrLTDM1NaHkJwWRdNnGVx",
-    "Patoshi Team": "EiZzS8ASb2ukxvP2AdvvD2CxJXuTyLfxZmf6bmPnpA7b",
-    "Patoshi Team": "6SCbq9k192ZHXTdduVgCW1oj24G9qoj1PF1xqeffBNjU",
-    "Patoshi Team": "5K5RtTWzzLp4P8Npi84ocf7F1vBsAu29N1irG4iiUnzt",
-    "Patoshi Team": "9rPYyANsfQZw3DnDmKE3YCQF5E8oD89UXoHn9JFEhJUz",
-    "Patoshi Team": "AVahywMVNRYzdgWrufSWrtdGXAeNEvfpJFxhVFK516mT",
-    "Patoshi Team": "5FJyYrQqaXePEgUpQ9t1CriJwXxJ4yAbHBJtcJUTwWRS",
-    "Patoshi Team": "CxBAA1mURqB6BT2mYAUHKcjK6iV5JjCoPdTzXCjH47uy",
-    "Patoshi Team": "6ZeLJuK1JQyE3wJiSgt1aCYMQdFPcGvDWtpXaZLYxAca",
-    "Patoshi Team": "EeZ3QLEkntPd3YBuhbQnaDQNiJgLp147pU6CjTiFti7i",
-    "Patoshi Team": "C2Sm2Xhwrwv395yZjYHp97tQ5bHpMvRbr7aL6RvoCayd",
-    "Patoshi Team": "BL73Ds3RPBenjeMxULKaafTGCoLXfn6G6WxrQhktaYkJ",
-    "Patoshi Team": "GVyBBoE1oNFkLdP7c9NcZTHqg9uSSDpSwYM9iED8Cpap",
-    "Patoshi Team": "62UWXo9spF2xi5g3mx536oQPPwoUm4XQTXv11ybAZUNq",
-    "Patoshi Team": "222dru1WfJfMpibTYME27fefYxd1gp3g11zatKh8ZKwa",
-    "Patoshi Team": "EoqopdFz41xo9SEhS8YZ2QzvcsCJXySMeZcgG9WzqG2s",
-    "Patoshi Team": "HmveAjHSFhuJWnV6pE14c2hKLkm2xnz3M371BBcTQqgG",
-    "Patoshi Team": "91nv5c7oXJuMGnPCrwiNPTJ7igxtdGeHoof7t2YLqtJK",
-    "Patoshi Team": "3BFBXFDZKA4vvg6XvgMqjAZJony1yPaFiB5J2hCqQd6E",
-    "Patoshi Team": "3etmwgxP4Lt2LLEyYpN2f9oKKi1onGy5XHRSP4BRq2vb",
-    "Patoshi Team": "67piDZqBKZgZE223KhCbo6pgXvqUnVF3LEECf1iwyU6C",
-    "Patoshi Team": "FWdKaXjxRVorEdVXJjgVdGrmHy96eQVnNTtuQwCY61dv",
-    "Patoshi Team": "8NEajacubhEj5HkK7rgxpDwQimFFgsiuXQMxqabdLsmg",
-    "Patoshi Team": "9f7EuAuucwtHRXC43X7CEZFVofozxRFsNmSwm585DSUL",
-    "Patoshi Team": "7GvLcqJDrtqWExiJUbKrNZKTVNfrt4if4rTCXe5SRHL",
-    "Patoshi Team": "BEhztgiG43bDju9jQrXmg38ugA4PJNkKhbRJboEz8x3i",
-    "Patoshi Team": "7fzr188oQEhdBrG3LiRcZfyHKNrFMty8sX5xetkqmsxB",
-    "Patoshi Team": "BhwuB5KYbEgDLHYwCGdet3TcUipjxExDQK3hDqtd78Qv",
-    "Patoshi Team": "5pnxeMsdVHy94nXwHHrUZnGYTkE8NDb6hvpVEgvxNgzm"
-    
-    
-    
-    
-    
-    
-    
-    
+    "Patoshi Team 01": "GVyByLjvURtf1wyNkfyJbQGrnjNo8uhAH7J6u197Cpap",
+    "Patoshi Team 02": "J8x8BFQrQe6xSwXEhmJFXmkkiMQ54N71ZQ5bmL9sFs4b",
+    "Patoshi Team 03": "7XJhvpp9X16Ynx2tgbQVH7exL6PTZLkEA6FxdpFYwebX",
+    "Patoshi Team 04": "Fe74jVetvQfqZ6J1xMNPpZ5SGQJUFxTyydPEyAk16pGR",
+    "Patoshi Team 05": "DSxyPrKxaDxeEJZ4Nb8cx8qsRNexw1W6UHmvqgEAA4hq",
+    "Patoshi Team 06": "GVyBRxSMpZEyzb3Cj2QiF9fRxV9xtgCUtz9vQ7fSCpap",
+    "Patoshi Team 07": "9nUNwTjTZASbbK9cigF7WKbo16oQ97uDG5kb38j4nd8H",
+    "Patoshi Team 08": "C68a6RCGLiPskbPYtAcsCjhG8tfTWYcoB4JjCrXFdqyo",
+    "Patoshi Team 09": "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9",
+    "Patoshi Team 10": "B9D2m5ghdPC9WJXw98cie3mzrLTDM1NaHkJwWRdNnGVx",
+    "Patoshi Team 11": "EiZzS8ASb2ukxvP2AdvvD2CxJXuTyLfxZmf6bmPnpA7b",
+    "Patoshi Team 12": "6SCbq9k192ZHXTdduVgCW1oj24G9qoj1PF1xqeffBNjU",
+    "Patoshi Team 13": "5K5RtTWzzLp4P8Npi84ocf7F1vBsAu29N1irG4iiUnzt",
+    "Patoshi Team 14": "9rPYyANsfQZw3DnDmKE3YCQF5E8oD89UXoHn9JFEhJUz",
+    "Patoshi Team 15": "AVahywMVNRYzdgWrufSWrtdGXAeNEvfpJFxhVFK516mT",
+    "Patoshi Team 16": "5FJyYrQqaXePEgUpQ9t1CriJwXxJ4yAbHBJtcJUTwWRS",
+    "Patoshi Team 17": "CxBAA1mURqB6BT2mYAUHKcjK6iV5JjCoPdTzXCjH47uy",
+    "Patoshi Team 18": "6ZeLJuK1JQyE3wJiSgt1aCYMQdFPcGvDWtpXaZLYxAca",
+    "Patoshi Team 19": "EeZ3QLEkntPd3YBuhbQnaDQNiJgLp147pU6CjTiFti7i",
+    "Patoshi Team 20": "C2Sm2Xhwrwv395yZjYHp97tQ5bHpMvRbr7aL6RvoCayd",
+    "Patoshi Team 21": "BL73Ds3RPBenjeMxULKaafTGCoLXfn6G6WxrQhktaYkJ",
+    "Patoshi Team 22": "GVyBBoE1oNFkLdP7c9NcZTHqg9uSSDpSwYM9iED8Cpap",
+    "Patoshi Team 23": "62UWXo9spF2xi5g3mx536oQPPwoUm4XQTXv11ybAZUNq",
+    "Patoshi Team 24": "222dru1WfJfMpibTYME27fefYxd1gp3g11zatKh8ZKwa",
+    "Patoshi Team 25": "EoqopdFz41xo9SEhS8YZ2QzvcsCJXySMeZcgG9WzqG2s",
+    "Patoshi Team 26": "HmveAjHSFhuJWnV6pE14c2hKLkm2xnz3M371BBcTQqgG",
+    "Patoshi Team 27": "91nv5c7oXJuMGnPCrwiNPTJ7igxtdGeHoof7t2YLqtJK",
+    "Patoshi Team 28": "3BFBXFDZKA4vvg6XvgMqjAZJony1yPaFiB5J2hCqQd6E",
+    "Patoshi Team 29": "3etmwgxP4Lt2LLEyYpN2f9oKKi1onGy5XHRSP4BRq2vb",
+    "Patoshi Team 30": "67piDZqBKZgZE223KhCbo6pgXvqUnVF3LEECf1iwyU6C",
+    "Patoshi Team 31": "FWdKaXjxRVorEdVXJjgVdGrmHy96eQVnNTtuQwCY61dv",
+    "Patoshi Team 32": "8NEajacubhEj5HkK7rgxpDwQimFFgsiuXQMxqabdLsmg",
+    "Patoshi Team 33": "9f7EuAuucwtHRXC43X7CEZFVofozxRFsNmSwm585DSUL",
+    "Patoshi Team 34": "7GvLcqJDrtqWExiJUbKrNZKTVNfrt4if4rTCXe5SRHL",
+    "Patoshi Team 35": "BEhztgiG43bDju9jQrXmg38ugA4PJNkKhbRJboEz8x3i",
+    "Patoshi Team 36": "7fzr188oQEhdBrG3LiRcZfyHKNrFMty8sX5xetkqmsxB",
+    "Patoshi Team 37": "BhwuB5KYbEgDLHYwCGdet3TcUipjxExDQK3hDqtd78Qv",
+    "Patoshi Team 38": "5pnxeMsdVHy94nXwHHrUZnGYTkE8NDb6hvpVEgvxNgzm",
 }
