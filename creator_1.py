@@ -33,7 +33,15 @@ TARGET_CREATORS = {
     "Patoshi Team": "67piDZqBKZgZE223KhCbo6pgXvqUnVF3LEECf1iwyU6C",
     "Patoshi Team": "FWdKaXjxRVorEdVXJjgVdGrmHy96eQVnNTtuQwCY61dv",
     "Patoshi Team": "8NEajacubhEj5HkK7rgxpDwQimFFgsiuXQMxqabdLsmg",
-    "Patoshi Team": "9f7EuAuucwtHRXC43X7CEZFVofozxRFsNmSwm585DSUL"
+    "Patoshi Team": "9f7EuAuucwtHRXC43X7CEZFVofozxRFsNmSwm585DSUL",
+    "Patoshi Team": "7GvLcqJDrtqWExiJUbKrNZKTVNfrt4if4rTCXe5SRHL",
+    "Patoshi Team": "BEhztgiG43bDju9jQrXmg38ugA4PJNkKhbRJboEz8x3i",
+    "Patoshi Team": "7fzr188oQEhdBrG3LiRcZfyHKNrFMty8sX5xetkqmsxB",
+    "Patoshi Team": "BhwuB5KYbEgDLHYwCGdet3TcUipjxExDQK3hDqtd78Qv",
+    "Patoshi Team": "B9D2m5ghdPC9WJXw98cie3mzrLTDM1NaHkJwWRdNnGVx",
+    "Patoshi Team": "5pnxeMsdVHy94nXwHHrUZnGYTkE8NDb6hvpVEgvxNgzm"
+    
+    
     
     
     
