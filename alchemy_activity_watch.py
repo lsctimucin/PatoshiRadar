@@ -10,6 +10,7 @@ POLL_SECONDS = int(os.getenv('POLL_SECONDS','5'))
 MAX_WATCHES = int(os.getenv('MAX_WATCHES','25'))
 RAYDIUM_PROGRAM_ID='675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8'
 watch_tokens={}; lock=threading.RLock(); running=False; worker_thread=None; callback=None; req_id=1000; req_lock=threading.Lock()
+TOKEN_ACCOUNT_REFRESH_EVERY = 3
 
 def log(x): print(x, flush=True)
 def _id():
@@ -59,7 +60,7 @@ def add_token(mint,name='',symbol='',creator='',launch_signature=''):
  if not mint: return False
  with lock:
   if mint in watch_tokens or len(watch_tokens)>=MAX_WATCHES: return False
-  now=time.time(); watch_tokens[mint]={'mint':mint,'name':name,'symbol':symbol,'creator':creator,'launch_signature':launch_signature,'started':now,'seen':set(),'transfer_seen':set(),'transfer_summary':[],'token_accounts':[],'lp':False,'dex':None,'buy':False,'lp_sig':None,'dex_sig':None,'buy_sig':None}
+  now=time.time(); watch_tokens[mint]={'mint':mint,'name':name,'symbol':symbol,'creator':creator,'launch_signature':launch_signature,'started':now,'seen':set(),'transfer_seen':set(),'transfer_summary':[],'token_accounts':[],'scan_count':0,'lp':False,'dex':None,'buy':False,'lp_sig':None,'dex_sig':None,'buy_sig':None}
  log(f'👁️ V5.2 WATCH BAŞLADI => {mint} | {WATCH_SECONDS}s'); return True
 
 def _process(mint):
@@ -76,9 +77,16 @@ def _process(mint):
   if lp and not item['lp']: item['lp']=True; item['lp_sig']=sig
   if dex and not item['dex']: item['dex']=dex; item['dex_sig']=sig
   if buy and not item['buy']: item['buy']=True; item['buy_sig']=sig
- # Transfer watch: discover token accounts and inspect their recent signatures.
+ # Transfer watch: refresh token-account discovery periodically so newly-created
+ # recipient/source accounts can also be observed during the 60s window.
  try:
-  transfers,item['token_accounts']=scan_token(_rpc,item['mint'],item['launch_signature'],item['transfer_seen'],item.get('token_accounts'))
+  item['scan_count'] += 1
+  token_accounts = None
+  if not item.get('token_accounts') or item['scan_count'] % TOKEN_ACCOUNT_REFRESH_EVERY == 0:
+   token_accounts = None
+  else:
+   token_accounts = item.get('token_accounts')
+  transfers,item['token_accounts']=scan_token(_rpc,item['mint'],item['launch_signature'],item['transfer_seen'],token_accounts)
   if transfers:
    classified=classify_transfers(transfers,item['creator'])
    existing={x['signature'] for x in item['transfer_summary']}
@@ -101,9 +109,8 @@ def worker():
     with lock: expired=time.time()-watch_tokens[mint]['started']>=WATCH_SECONDS
     if expired: _finish(mint); continue
     _process(mint)
-    with lock: complete=watch_tokens.get(mint) and watch_tokens[mint]['lp'] and watch_tokens[mint]['dex'] and watch_tokens[mint]['buy']
-    # Do NOT finish early if transfer watch has not had enough time; transfers are the V5.2 signal.
-    if complete and time.time()-watch_tokens[mint]['started']>=20: _finish(mint)
+    # V5.2 intentionally keeps the full watch window. Transfer activity can
+    # happen after LP/DEX/first-buy are already detected.
    time.sleep(POLL_SECONDS)
   except Exception as e: log(f'❌ V5.2 WORKER => {e}'); time.sleep(2)
 
