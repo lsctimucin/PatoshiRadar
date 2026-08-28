@@ -1,40 +1,97 @@
-"""V5.2 transfer classification. Treasury is optional."""
+"""Patoshi Radar V5.2 - transfer classification.
+
+Treasury is optional.
+"""
+
 import os
 from collections import defaultdict
 
-TREASURY = os.getenv("PATOSHI_TREASURY_WALLET", "").strip()
-BULK_THRESHOLD = int(os.getenv("V52_BULK_RECIPIENT_THRESHOLD", "5"))
+
+TREASURY = os.getenv(
+    "PATOSHI_TREASURY_WALLET",
+    "",
+).strip()
+
+BULK_THRESHOLD = int(
+    os.getenv(
+        "V52_BULK_RECIPIENT_THRESHOLD",
+        "5",
+    )
+)
 
 
-def classify_transfers(transfers, creator="", treasury=None):
-    treasury = (treasury if treasury is not None else TREASURY).strip()
+def classify_transfers(
+    transfers,
+    creator="",
+    treasury=None,
+):
+    treasury = (
+        treasury
+        if treasury is not None
+        else TREASURY
+    ).strip()
+
     creator = (creator or "").strip()
+
     grouped = defaultdict(list)
 
     for transfer in transfers or []:
-        if not transfer.get("from_owner") or not transfer.get("to_owner"):
+        from_owner = transfer.get("from_owner")
+        to_owner = transfer.get("to_owner")
+
+        if not from_owner or not to_owner:
             continue
-        grouped[transfer.get("signature", "")].append(transfer)
+
+        signature = transfer.get("signature", "")
+
+        grouped[signature].append(transfer)
 
     output = []
+
     for signature, items in grouped.items():
-        recipients = {x["to_owner"] for x in items}
-        senders = {x["from_owner"] for x in items}
-        label = "🟢 Ordinary Transfer"
-        reason = "Normal SPL token movement"
+        recipients = {
+            item["to_owner"]
+            for item in items
+        }
+
+        senders = {
+            item["from_owner"]
+            for item in items
+        }
+
+        # --------------------------------------------------
+        # V5.2 classification priority
+        # --------------------------------------------------
 
         if creator and creator in senders:
-            label, reason = "🔴 Creator Transfer", "Creator wallet sent tokens"
+            label = "🔴 Creator Transfer"
+            reason = "Creator wallet sent tokens"
+
+        elif treasury and (
+            treasury in senders
+            or treasury in recipients
+        ):
+            label = "🟣 Treasury Transfer"
+
+            if treasury in senders:
+                reason = "Tracked treasury sent tokens"
+            else:
+                reason = "Tracked treasury received tokens"
+
+        elif len(recipients) >= BULK_THRESHOLD:
+            label = "🟠 Bulk Distribution"
+            reason = (
+                f"{len(recipients)} recipient wallets "
+                "in one transaction"
+            )
+
         elif creator and creator in recipients:
-            label, reason = "🔵 Possible Official Distribution", "Creator wallet received tokens"
+            label = "🔵 Possible Official Distribution"
+            reason = "Creator wallet received tokens"
 
-        if treasury and treasury in senders:
-            label, reason = "🟣 Treasury Transfer", "Tracked treasury sent tokens"
-        elif treasury and treasury in recipients:
-            label, reason = "🔵 Possible Official Distribution", "Tracked treasury received tokens"
-
-        if len(recipients) >= BULK_THRESHOLD:
-            label, reason = "🟠 Bulk Distribution", f"{len(recipients)} recipient wallets in one transaction"
+        else:
+            label = "🟢 Ordinary Transfer"
+            reason = "Normal SPL token movement"
 
         output.append(
             {
@@ -44,4 +101,5 @@ def classify_transfers(transfers, creator="", treasury=None):
                 "transfers": items,
             }
         )
+
     return output
