@@ -126,7 +126,7 @@ def on_activity_complete(result):
             f"🛒 <b>First Buy:</b> "
             f"{'✅ VAR' if result.get('buy_detected') else '❌ YOK'}\n\n"
             f"<b>Transfer Watch</b>\n{transfer_text}\n\n"
-            f"🌐 <code>{_short(mint, 20)}</code>\n"
+            f"🌐 <code>{mint}</code>\n"
             f'<a href="https://pump.fun/{mint}">Pump.fun</a>'
         )
 
