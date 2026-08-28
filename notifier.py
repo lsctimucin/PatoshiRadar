@@ -2,13 +2,6 @@ import html
 from datetime import datetime, timezone
 
 
-def _short(value, length=18):
-    if not value:
-        return "-"
-    value = str(value)
-    return value if len(value) <= length else value[:length] + "..."
-
-
 def _creator_label(creator_name, creator_info):
     if creator_name:
         return str(creator_name)
@@ -59,7 +52,6 @@ def build_message(
         timezone.utc
     ).strftime("%Y-%m-%d %H:%M UTC")
 
-    # Görseldeki mevcut Telegram düzeni korunuyor.
     message = (
         "🚀 <b>PATOSHI RADAR</b>\n\n"
         f"🧨 <b>{safe_name}</b> ({safe_symbol})\n\n"
@@ -68,7 +60,7 @@ def build_message(
         "🆕 İlk Launch\n\n"
         f"💰 {sol_value:.2f} SOL 🟠\n"
         "🎯 20/100 🔴\n\n"
-        f"🌐 <code>{_short(safe_mint, 20)}</code>\n\n"
+        f"🌐 <code>{safe_mint}</code>\n\n"
         f"⏰ {now_utc}\n\n"
         f'🔗 <a href="https://pump.fun/{safe_mint}">Pump.fun</a>'
     )
