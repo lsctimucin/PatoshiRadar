@@ -12,7 +12,7 @@ KEYWORDS = [
     "patosh",
     "patoshimeme",
     "$patoshi",
-    "$pat",
+    "star",
 ]
 
 
