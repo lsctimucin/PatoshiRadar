@@ -20,18 +20,13 @@ from long_transfer_watch import (
 )
 
 
-def _short(value, length=18):
-    if not value:
-        return "-"
-    value = str(value)
-    return value if len(value) <= length else value[:length] + "..."
-
-
 def _format_elapsed(seconds):
     seconds = max(0, int(seconds or 0))
     minutes, seconds = divmod(seconds, 60)
+
     if minutes:
         return f"{minutes} dk {seconds} sn"
+
     return f"{seconds} sn"
 
 
@@ -42,24 +37,29 @@ def on_long_transfer_alert(result):
     try:
         mint = result.get("mint", "")
         transfers = result.get("transfers") or []
+
         recipients = {
             item.get("to_owner")
             for item in transfers
             if item.get("to_owner")
         }
+
         amount_count = len(transfers)
 
         detail_lines = []
+
         if recipients:
             detail_lines.append(
                 f"👥 <b>Alıcı wallet:</b> {len(recipients)}"
             )
+
         if amount_count:
             detail_lines.append(
                 f"🔁 <b>Transfer kaydı:</b> {amount_count}"
             )
 
         details = "\n".join(detail_lines)
+
         if details:
             details += "\n\n"
 
@@ -79,17 +79,25 @@ def on_long_transfer_alert(result):
         if send_message(message):
             print(
                 f"📨 V5.2 LONG TRANSFER ALERT GÖNDERİLDİ => "
-                f"{mint} | {result.get('label')} | "
-                f"{result.get('signature')}"
-            , flush=True)
+                f"{mint} | "
+                f"{result.get('label')} | "
+                f"{result.get('signature')}",
+                flush=True,
+            )
+
         else:
             print(
-                f"❌ V5.2 LONG TRANSFER ALERT GÖNDERİLEMEDİ => {mint}",
+                f"❌ V5.2 LONG TRANSFER ALERT "
+                f"GÖNDERİLEMEDİ => {mint}",
                 flush=True,
             )
 
     except Exception as exc:
-        print(f"❌ V5.2 Long Transfer Telegram callback hatası => {exc}", flush=True)
+        print(
+            f"❌ V5.2 Long Transfer Telegram "
+            f"callback hatası => {exc}",
+            flush=True,
+        )
 
 
 def on_activity_complete(result):
@@ -104,6 +112,7 @@ def on_activity_complete(result):
             f"{item['label']} — {item['reason']}"
             for item in summaries[:6]
         ]
+
         transfer_text = (
             "\n".join(lines)
             if lines
@@ -125,7 +134,8 @@ def on_activity_complete(result):
             f"🏛️ <b>DEX:</b> {dex_text}\n"
             f"🛒 <b>First Buy:</b> "
             f"{'✅ VAR' if result.get('buy_detected') else '❌ YOK'}\n\n"
-            f"<b>Transfer Watch</b>\n{transfer_text}\n\n"
+            f"<b>Transfer Watch</b>\n"
+            f"{transfer_text}\n\n"
             f"🌐 <code>{mint}</code>\n"
             f'<a href="https://pump.fun/{mint}">Pump.fun</a>'
         )
@@ -133,11 +143,16 @@ def on_activity_complete(result):
         send_message(message)
 
     except Exception as exc:
-        print(f"❌ V5.2 callback hatası => {exc}", flush=True)
+        print(
+            f"❌ V5.2 callback hatası => {exc}",
+            flush=True,
+        )
 
-    # The normal 60-second V5.2 report is now complete. Start a separate
-    # 75-minute transfer-only watch. Signatures already covered by the first
-    # report are preloaded so Long Watch does not send duplicate alerts.
+    # 60 saniyelik V5.2 raporu tamamlandıktan sonra
+    # ayrı 75 dakikalık Transfer Watch başlatılır.
+    #
+    # İlk 60 saniyede görülmüş signature'lar Long Watch'a
+    # aktarılır. Böylece aynı transaction tekrar bildirilmez.
     try:
         initial_seen_signatures = [
             item.get("signature")
@@ -155,19 +170,32 @@ def on_activity_complete(result):
 
         if added:
             print(
-                f"🛰️ V5.2 75 DK LONG TRANSFER WATCH EKLENDİ => {mint}",
+                f"🛰️ V5.2 75 DK LONG TRANSFER "
+                f"WATCH EKLENDİ => {mint}",
                 flush=True,
             )
 
     except Exception as exc:
-        print(f"❌ V5.2 Long Watch başlatma hatası => {exc}", flush=True)
+        print(
+            f"❌ V5.2 Long Watch başlatma "
+            f"hatası => {exc}",
+            flush=True,
+        )
 
 
 def new_token(data):
-    print(json.dumps(data, indent=2, ensure_ascii=False), flush=True)
+    print(
+        json.dumps(
+            data,
+            indent=2,
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
 
     creator = data.get("traderPublicKey", "")
     creator_info = update_creator(creator)
+
     name = data.get("name", "Bilinmiyor")
     symbol = data.get("symbol", "-")
     mint = data.get("mint", "")
@@ -194,10 +222,17 @@ def new_token(data):
         creator_info=creator_info,
     )
 
-    # First alert stays immediate. The existing 60-second V5.2 watch starts
-    # only after Telegram succeeds.
+    # İlk Telegram alarmı anında gönderilir.
+    # Telegram başarılıysa mevcut 60 saniyelik
+    # V5.2 Activity + Transfer Watch başlatılır.
     if send_message(message):
-        mark_sent(mint, name, symbol, creator)
+        mark_sent(
+            mint,
+            name,
+            symbol,
+            creator,
+        )
+
         add_token(
             mint=mint,
             name=name,
@@ -205,31 +240,55 @@ def new_token(data):
             creator=creator,
             launch_signature=launch_signature,
         )
+
         print(
-            f"🚀 V5.2 WATCH EKLENDİ => {name} ({symbol}) | {mint}",
+            f"🚀 V5.2 WATCH EKLENDİ => "
+            f"{name} ({symbol}) | {mint}",
             flush=True,
         )
 
 
 initialize_database()
-set_result_callback(on_activity_complete)
-set_long_transfer_callback(on_long_transfer_alert)
+
+set_result_callback(
+    on_activity_complete
+)
+
+set_long_transfer_callback(
+    on_long_transfer_alert
+)
+
 start_alchemy_watch()
 start_long_transfer_watch()
 
-print("🚀 Patoshi Radar V5.2 FINAL başlatılıyor...", flush=True)
+print(
+    "🚀 Patoshi Radar V5.2 FINAL başlatılıyor...",
+    flush=True,
+)
+
 print(
     "📡 PumpPortal → Keywords/Wallet → Telegram → "
     "60s V5.2 → 75dk Long Transfer Watch",
     flush=True,
 )
-print("ℹ️ Long Transfer Watch treasury kullanmaz.", flush=True)
 
-monitor = PumpMonitor(new_token)
+print(
+    "ℹ️ Long Transfer Watch treasury kullanmaz.",
+    flush=True,
+)
+
+monitor = PumpMonitor(
+    new_token
+)
+
 monitor.start()
 
 try:
     while True:
         time.sleep(1)
+
 except KeyboardInterrupt:
-    print("🛑 Patoshi Radar durduruldu.", flush=True)
+    print(
+        "🛑 Patoshi Radar durduruldu.",
+        flush=True,
+    )
