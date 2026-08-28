@@ -35,10 +35,7 @@ def on_activity_complete(result):
     try:
         mint = result.get("mint", "")
 
-        summaries = (
-            result.get("transfer_summary")
-            or []
-        )
+        summaries = result.get("transfer_summary") or []
 
         lines = [
             f"{item['label']} — {item['reason']}"
@@ -53,26 +50,35 @@ def on_activity_complete(result):
                 "tespit edilmedi."
             )
 
+        if result.get("dex_name"):
+            dex_text = result.get("dex_name")
+        elif result.get("dex_detected"):
+            dex_text = "Tespit edildi"
+        else:
+            dex_text = "❌ YOK"
+
+        lp_text = (
+            "✅ VAR"
+            if result.get("lp_detected")
+            else "❌ YOK"
+        )
+
+        buy_text = (
+            "✅ VAR"
+            if result.get("buy_detected")
+            else "❌ YOK"
+        )
+
         message = (
             "🔬 <b>PATOSHI RADAR — V5.2 WATCH</b>\n\n"
             f"🧨 <b>{result.get('name', 'Bilinmiyor')}</b> "
             f"({result.get('symbol', '-')})\n\n"
-
-            f"💧 <b>LP:</b> "
-            f"{'✅ VAR' if result.get('lp_detected') else '❌ YOK'}\n"
-
-            f"🏛️ <b>DEX:</b> "
-            f"{result.get('dex_name') or "
-            "('Tespit edildi' if result.get('dex_detected') else '❌ YOK')}\n"
-
-            f"🛒 <b>First Buy:</b> "
-            f"{'✅ VAR' if result.get('buy_detected') else '❌ YOK'}\n\n"
-
+            f"💧 <b>LP:</b> {lp_text}\n"
+            f"🏛️ <b>DEX:</b> {dex_text}\n"
+            f"🛒 <b>First Buy:</b> {buy_text}\n\n"
             f"<b>Transfer Watch</b>\n"
             f"{transfer_text}\n\n"
-
             f"🌐 <code>{_short(mint, 20)}</code>\n"
-
             f'<a href="https://pump.fun/{mint}">'
             "Pump.fun"
             "</a>"
@@ -103,39 +109,14 @@ def new_token(data):
         flush=True,
     )
 
-    creator = data.get(
-        "traderPublicKey",
-        "",
-    )
+    creator = data.get("traderPublicKey", "")
+    creator_info = update_creator(creator)
 
-    creator_info = update_creator(
-        creator
-    )
-
-    name = data.get(
-        "name",
-        "Bilinmiyor",
-    )
-
-    symbol = data.get(
-        "symbol",
-        "-",
-    )
-
-    mint = data.get(
-        "mint",
-        "",
-    )
-
-    market_cap = data.get(
-        "marketCapSol",
-        0,
-    )
-
-    launch_signature = data.get(
-        "signature",
-        "",
-    )
+    name = data.get("name", "Bilinmiyor")
+    symbol = data.get("symbol", "-")
+    mint = data.get("mint", "")
+    market_cap = data.get("marketCapSol", 0)
+    launch_signature = data.get("signature", "")
 
     if not mint:
         return
@@ -143,14 +124,8 @@ def new_token(data):
     if already_sent(mint):
         return
 
-    creator_name = creator_match(
-        creator
-    )
-
-    keyword = keyword_match(
-        name,
-        symbol,
-    )
+    creator_name = creator_match(creator)
+    keyword = keyword_match(name, symbol)
 
     if not creator_name and not keyword:
         return
@@ -166,13 +141,7 @@ def new_token(data):
         creator_info=creator_info,
     )
 
-    # =========================================================
-    # FIRST TELEGRAM ALERT
-    # =========================================================
-
-    telegram_ok = send_message(
-        message
-    )
+    telegram_ok = send_message(message)
 
     print(
         f"🧪 V5.2 TEST => "
@@ -188,10 +157,6 @@ def new_token(data):
         )
         return
 
-    # =========================================================
-    # DATABASE
-    # =========================================================
-
     try:
         mark_sent(
             mint,
@@ -201,8 +166,7 @@ def new_token(data):
         )
 
         print(
-            "🧪 V5.2 TEST => "
-            "mark_sent OK",
+            "🧪 V5.2 TEST => mark_sent OK",
             flush=True,
         )
 
@@ -212,10 +176,6 @@ def new_token(data):
             f"mark_sent ERROR: {exc}",
             flush=True,
         )
-
-    # =========================================================
-    # V5.2 WATCH
-    # =========================================================
 
     try:
         added = add_token(
@@ -253,10 +213,6 @@ def new_token(data):
             flush=True,
         )
 
-
-# =============================================================
-# STARTUP
-# =============================================================
 
 initialize_database()
 
