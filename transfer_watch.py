@@ -1,130 +1,93 @@
-"""Patoshi Radar V5.2 Transfer Watch.
-
-Hooks into the V5.1 Alchemy Activity Watch transaction fetcher so the same
-getTransaction RPC response is reused. No second polling loop is created.
-"""
 import os
+import time
 from collections import defaultdict
 
-TREASURY_WALLET = os.getenv("PATOSHI_TREASURY_WALLET", "").strip()
-BULK_RECIPIENT_THRESHOLD = int(os.getenv("V52_BULK_RECIPIENT_THRESHOLD", "5"))
-MIN_TRANSFER_AMOUNT = float(os.getenv("V52_MIN_TRANSFER_AMOUNT", "0"))
+TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
+TRANSFER_WATCH_SECONDS = int(os.getenv('V52_TRANSFER_WATCH_SECONDS', '60'))
+TRANSFER_POLL_SECONDS = int(os.getenv('V52_TRANSFER_POLL_SECONDS', '8'))
+MAX_TOKEN_ACCOUNTS = int(os.getenv('V52_MAX_TOKEN_ACCOUNTS', '80'))
 
 
-def _owner(balance):
-    return str((balance or {}).get("owner") or "").strip()
+def _rpc(rpc, method, params):
+    return rpc(method, params)
 
 
-def _amount(balance):
-    try:
-        ui = (balance or {}).get("uiTokenAmount") or {}
-        if ui.get("uiAmountString") is not None:
-            return float(ui["uiAmountString"])
-        if ui.get("uiAmount") is not None:
-            return float(ui["uiAmount"])
-        raw = int(ui.get("amount", 0))
-        decimals = int(ui.get("decimals", 0))
-        return raw / (10 ** decimals)
-    except Exception:
-        return 0.0
-
-
-def _aggregate(balances, mint):
-    result = defaultdict(float)
-    for balance in balances or []:
-        if not isinstance(balance, dict) or balance.get("mint") != mint:
+def token_accounts_for_mint(rpc, mint):
+    result = _rpc(rpc, 'getProgramAccounts', [TOKEN_PROGRAM, {
+        'encoding': 'jsonParsed',
+        'filters': [
+            {'dataSize': 165},
+            {'memcmp': {'offset': 0, 'bytes': mint}},
+        ],
+    }])
+    accounts = []
+    for row in result or []:
+        if not isinstance(row, dict):
             continue
-        owner = _owner(balance)
-        if owner:
-            result[owner] += _amount(balance)
-    return result
+        pubkey = row.get('pubkey')
+        if pubkey:
+            accounts.append(pubkey)
+    return accounts[:MAX_TOKEN_ACCOUNTS]
 
 
-def classify_transaction(tx, mint, creator="", signature=""):
-    if not tx or not mint:
-        return None
-    meta = tx.get("meta") or {}
-    if meta.get("err") is not None:
-        return None
+def parse_transfer_balances(tx, mint):
+    meta = (tx or {}).get('meta') or {}
+    pre = meta.get('preTokenBalances') or []
+    post = meta.get('postTokenBalances') or []
+    by_idx = {}
+    for b in pre:
+        if b.get('mint') == mint:
+            by_idx.setdefault(b.get('accountIndex'), {})['pre'] = b
+    for b in post:
+        if b.get('mint') == mint:
+            by_idx.setdefault(b.get('accountIndex'), {})['post'] = b
 
-    pre = _aggregate(meta.get("preTokenBalances"), mint)
-    post = _aggregate(meta.get("postTokenBalances"), mint)
-    senders = {}
-    recipients = {}
+    changes = []
+    for idx, pair in by_idx.items():
+        a = pair.get('pre', {})
+        b = pair.get('post', {})
+        pre_amt = int((a.get('uiTokenAmount') or {}).get('amount') or 0)
+        post_amt = int((b.get('uiTokenAmount') or {}).get('amount') or 0)
+        delta = post_amt - pre_amt
+        if delta == 0:
+            continue
+        owner = (b.get('owner') or a.get('owner') or '').strip()
+        changes.append({'account_index': idx, 'owner': owner, 'delta': delta})
 
-    for owner in set(pre) | set(post):
-        delta = post.get(owner, 0.0) - pre.get(owner, 0.0)
-        if delta < -MIN_TRANSFER_AMOUNT:
-            senders[owner] = abs(delta)
-        elif delta > MIN_TRANSFER_AMOUNT:
-            recipients[owner] = delta
-
-    if not senders or not recipients:
-        return None
-
-    creator = (creator or "").strip()
-    if creator and creator in senders:
-        kind = "CREATOR_TRANSFER"
-        reason = "Creator token transfer"
-    elif TREASURY_WALLET and (TREASURY_WALLET in senders or TREASURY_WALLET in recipients):
-        kind = "TREASURY_TRANSFER"
-        reason = "Tracked Patoshi Treasury transfer"
-    elif len(recipients) >= BULK_RECIPIENT_THRESHOLD:
-        kind = "BULK_DISTRIBUTION"
-        reason = "Multi-wallet / bulk distribution"
-    elif creator and creator in recipients:
-        kind = "OFFICIAL_DISTRIBUTION"
-        reason = "Possible official creator distribution"
-    else:
-        kind = "ORDINARY_TRANSFER"
-        reason = "Ordinary token transfer"
-
-    return {
-        "type": kind,
-        "reason": reason,
-        "mint": mint,
-        "signature": signature,
-        "senders": senders,
-        "recipients": recipients,
-        "sender_count": len(senders),
-        "recipient_count": len(recipients),
-        "total_sent": round(sum(senders.values()), 9),
-        "total_received": round(sum(recipients.values()), 9),
-        "creator": creator,
-        "treasury": TREASURY_WALLET,
-    }
+    senders = [x for x in changes if x['delta'] < 0]
+    receivers = [x for x in changes if x['delta'] > 0]
+    transfers = []
+    for s in senders:
+        remaining = -s['delta']
+        for r in receivers:
+            if remaining <= 0:
+                break
+            amount = min(remaining, r['delta'])
+            if amount <= 0:
+                continue
+            transfers.append({'from_owner': s['owner'], 'to_owner': r['owner'], 'amount_raw': amount})
+            remaining -= amount
+    return transfers
 
 
-def install(activity_module, callback):
-    """Monkey-patch V5.1's existing transaction fetcher.
-
-    The original RPC request is performed exactly once; this wrapper only
-    analyzes its returned transaction and then gives it back to V5.1.
-    """
-    original = activity_module._get_transaction
-    if getattr(original, "_v52_wrapped", False):
-        return
-
-    def wrapped(signature):
-        tx = original(signature)
-        if tx:
-            try:
-                mint_events = []
-                for mint, item in list(activity_module.watch_tokens.items()):
-                    event = classify_transaction(
-                        tx,
-                        mint,
-                        item.get("creator", ""),
-                        signature,
-                    )
-                    if event:
-                        mint_events.append(event)
-                for event in mint_events:
-                    callback(event)
-            except Exception as exc:
-                print(f"⚠️ V5.2 TRANSFER CLASSIFIER ERROR => {exc}", flush=True)
-        return tx
-
-    wrapped._v52_wrapped = True
-    activity_module._get_transaction = wrapped
-    print("🧩 V5.2 Transfer Watch: V5.1 getTransaction hook aktif.", flush=True)
+def scan_token(rpc, mint, launch_signature='', seen_signatures=None, token_accounts=None):
+    seen_signatures = seen_signatures if seen_signatures is not None else set()
+    token_accounts = token_accounts or token_accounts_for_mint(rpc, mint)
+    found = []
+    for account in token_accounts:
+        rows = _rpc(rpc, 'getSignaturesForAddress', [account, {'limit': 10, 'commitment': 'confirmed'}]) or []
+        for row in reversed(rows):
+            sig = row.get('signature') if isinstance(row, dict) else None
+            if not sig or sig in seen_signatures or sig == launch_signature:
+                continue
+            seen_signatures.add(sig)
+            tx = _rpc(rpc, 'getTransaction', [sig, {
+                'encoding': 'jsonParsed', 'commitment': 'confirmed', 'maxSupportedTransactionVersion': 0
+            }])
+            if not tx:
+                continue
+            transfers = parse_transfer_balances(tx, mint)
+            for t in transfers:
+                t['signature'] = sig
+                found.append(t)
+    return found, token_accounts
