@@ -1,14 +1,28 @@
 import os
-import re
 import requests
+
 
 # ============================================================
 # PATOSHI RADAR - ROUND 3 WALLET EXTRACTOR
-# One-time utility
+# FINAL
+#
+# Amaç:
+# - Round 3 işlem TX'lerini Alchemy üzerinden okumak
+# - SPL Transfer / TransferChecked işlemlerini çözmek
+# - Token account yerine mümkün olduğunca OWNER wallet çıkarmak
+# - Tim / Faik walletlarını isimlendirmek
+# - Diğerlerini Round3-01, Round3-02 ... yapmak
+#
+# Bu dosya Patoshi Radar'ın çalışan sistemini DEĞİŞTİRMEZ.
+# Tek seferlik analiz aracıdır.
 # ============================================================
 
-# Railway'deki mevcut Solana/Alchemy RPC URL'ni kullan.
-RPC_URL = (
+
+# ------------------------------------------------------------
+# ALCHEMY
+# Ana PatoshiRadar servisindeki aynı environment variable.
+# ------------------------------------------------------------
+
 ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY", "").strip()
 
 RPC_URL = (
@@ -17,13 +31,22 @@ RPC_URL = (
     else ""
 )
 
-# Bildiğimiz wallet'lar
+
+# ------------------------------------------------------------
+# BİLDİĞİMİZ ROUND 3 WALLETLARI
+# Burak daha sonra eklenebilir.
+# ------------------------------------------------------------
+
 KNOWN_WALLETS = {
     "Tim": "TVWcpT6PUDCVvqRsqkukbTWqih3YdxrEVGAgwvZ1F6z",
     "Faik": "4fqGUHnq7oL94YZ1sVN1PpvNQbHUwZP1GaVyvXt3K5RX",
 }
 
-# round 3 wallet.txt içindeki 30 transaction
+
+# ------------------------------------------------------------
+# ROUND 3 TRANSACTIONS
+# ------------------------------------------------------------
+
 TX_SIGNATURES = [
     "4rbAuXk5fYNXdqs7Mw3Wzo3npj5YVHHxecEZH8gQy3TTXUm6gJBGXhZ9GRrWuET5bdv8VbdRAd6Ms9T49p9NZqYn",
     "46pf5Eq2LYJZRMEYAsAKrLw7fFBznw1UVSVXzv8syJyCzVHVMQ5DYx66h5v5Uu9ka79Yx34jiDBTGTtP7C9nsrk8",
@@ -58,6 +81,10 @@ TX_SIGNATURES = [
 ]
 
 
+# ============================================================
+# RPC
+# ============================================================
+
 def rpc_call(method, params):
     payload = {
         "jsonrpc": "2.0",
@@ -73,6 +100,7 @@ def rpc_call(method, params):
     )
 
     response.raise_for_status()
+
     data = response.json()
 
     if "error" in data:
@@ -95,38 +123,82 @@ def get_transaction(signature):
     )
 
 
+# ============================================================
+# HELPERS
+# ============================================================
+
+def unique_preserve_order(values):
+    seen = set()
+    output = []
+
+    for value in values:
+        if not value:
+            continue
+
+        if value in seen:
+            continue
+
+        seen.add(value)
+        output.append(value)
+
+    return output
+
+
+def known_label(wallet):
+    for label, address in KNOWN_WALLETS.items():
+        if address == wallet:
+            return label
+
+    return None
+
+
 def get_account_keys(tx):
     message = tx.get("transaction", {}).get("message", {})
-    keys = []
+
+    result = []
 
     for item in message.get("accountKeys", []):
         if isinstance(item, str):
-            keys.append({
-                "pubkey": item,
-                "signer": False,
-                "writable": False,
-            })
-        elif isinstance(item, dict):
-            keys.append({
-                "pubkey": item.get("pubkey"),
-                "signer": bool(item.get("signer")),
-                "writable": bool(item.get("writable")),
-            })
+            result.append(
+                {
+                    "pubkey": item,
+                    "signer": False,
+                    "writable": False,
+                }
+            )
 
-    return keys
+        elif isinstance(item, dict):
+            result.append(
+                {
+                    "pubkey": item.get("pubkey"),
+                    "signer": bool(item.get("signer")),
+                    "writable": bool(item.get("writable")),
+                }
+            )
+
+    return result
+
+
+def get_signers(tx):
+    return [
+        item["pubkey"]
+        for item in get_account_keys(tx)
+        if item.get("signer") and item.get("pubkey")
+    ]
 
 
 def get_token_owners(tx):
     """
-    Maps token-account index -> owner wallet using pre/postTokenBalances.
+    accountIndex -> token account owner wallet
     """
+
     result = {}
 
     meta = tx.get("meta") or {}
 
     balances = (
-        meta.get("preTokenBalances", [])
-        + meta.get("postTokenBalances", [])
+        (meta.get("preTokenBalances") or [])
+        + (meta.get("postTokenBalances") or [])
     )
 
     for balance in balances:
@@ -134,19 +206,22 @@ def get_token_owners(tx):
         owner = balance.get("owner")
         mint = balance.get("mint")
 
-        if index is not None and owner:
-            result[index] = {
-                "owner": owner,
-                "mint": mint,
-            }
+        if index is None or not owner:
+            continue
+
+        result[index] = {
+            "owner": owner,
+            "mint": mint,
+        }
 
     return result
 
 
 def walk_instructions(tx):
     """
-    Returns top-level and inner parsed instructions.
+    Top-level + inner instructions
     """
+
     output = []
 
     message = tx.get("transaction", {}).get("message", {})
@@ -163,12 +238,11 @@ def walk_instructions(tx):
     return output
 
 
-def extract_transfer_candidates(tx):
-    """
-    Extract parsed SPL Transfer / TransferChecked destination candidates.
+# ============================================================
+# TRANSFER PARSER
+# ============================================================
 
-    We prefer destination OWNER wallet when Solana supplies it.
-    """
+def extract_transfer_candidates(tx):
     account_keys = get_account_keys(tx)
     token_owners = get_token_owners(tx)
 
@@ -180,15 +254,21 @@ def extract_transfer_candidates(tx):
         if not isinstance(parsed, dict):
             continue
 
-        instruction_type = str(parsed.get("type", "")).lower()
+        instruction_type = str(
+            parsed.get("type", "")
+        ).lower()
 
-        if instruction_type not in ("transfer", "transferchecked"):
+        if instruction_type not in (
+            "transfer",
+            "transferchecked",
+        ):
             continue
 
         info = parsed.get("info") or {}
 
         source = info.get("source")
         destination = info.get("destination")
+
         authority = (
             info.get("authority")
             or info.get("owner")
@@ -198,17 +278,22 @@ def extract_transfer_candidates(tx):
         destination_owner = None
         source_owner = None
 
-        # Resolve token-account addresses to wallet owners via accountKeys index.
+        # Token account -> Owner wallet çözümleme
         for index, key in enumerate(account_keys):
             pubkey = key.get("pubkey")
 
-            if pubkey == destination and index in token_owners:
+            if (
+                pubkey == destination
+                and index in token_owners
+            ):
                 destination_owner = token_owners[index]["owner"]
 
-            if pubkey == source and index in token_owners:
+            if (
+                pubkey == source
+                and index in token_owners
+            ):
                 source_owner = token_owners[index]["owner"]
 
-        # Some parsed transaction responses expose owner directly.
         destination_owner = (
             info.get("destinationOwner")
             or destination_owner
@@ -230,254 +315,345 @@ def extract_transfer_candidates(tx):
 
         mint = info.get("mint")
 
-        candidates.append({
-            "type": instruction_type,
-            "source_token_account": source,
-            "destination_token_account": destination,
-            "source_owner": source_owner,
-            "destination_owner": destination_owner,
-            "mint": mint,
-            "amount": amount,
-        })
+        candidates.append(
+            {
+                "type": instruction_type,
+                "source_token_account": source,
+                "destination_token_account": destination,
+                "source_owner": source_owner,
+                "destination_owner": destination_owner,
+                "mint": mint,
+                "amount": amount,
+            }
+        )
 
     return candidates
 
 
-def get_signers(tx):
-    return [
-        item["pubkey"]
-        for item in get_account_keys(tx)
-        if item.get("signer") and item.get("pubkey")
-    ]
-
-
-def short(address):
-    if not address:
-        return "-"
-    if len(address) <= 14:
-        return address
-    return f"{address[:7]}...{address[-7:]}"
-
-
-def unique_preserve_order(values):
-    seen = set()
-    output = []
-
-    for value in values:
-        if not value:
-            continue
-
-        if value not in seen:
-            seen.add(value)
-            output.append(value)
-
-    return output
-
-
-def known_label(wallet):
-    for label, address in KNOWN_WALLETS.items():
-        if address == wallet:
-            return label
-    return None
-
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
+    print("")
+    print("=" * 76)
+    print("PATOSHI RADAR - ROUND 3 WALLET EXTRACTOR")
+    print("=" * 76)
+
     if not RPC_URL:
         print("")
-        print("❌ RPC URL bulunamadı.")
+        print("❌ ALCHEMY_API_KEY bulunamadı.")
         print("")
-        print("Railway Variables içinde kullandığın Solana Alchemy")
-        print("HTTP RPC adresini aşağıdaki isimlerden biriyle ekle:")
+        print(
+            "victorious-smile -> Variables içine "
+            "ALCHEMY_API_KEY ekle."
+        )
         print("")
-        print("ALCHEMY_RPC_URL=https://solana-mainnet.g.alchemy.com/v2/...")
-        print("")
-        print("ve script'i tekrar çalıştır.")
         return
 
-    print("=" * 74)
-    print("PATOSHI RADAR - ROUND 3 WALLET EXTRACTOR")
-    print("=" * 74)
-
-    # Dosyada aynı TX iki kez bulunuyor. RPC kredisi harcamamak için temizle.
+    # Aynı TX iki kez varsa tek RPC isteği
     signatures = unique_preserve_order(TX_SIGNATURES)
 
-    print(f"Input TX     : {len(TX_SIGNATURES)}")
-    print(f"Unique TX    : {len(signatures)}")
+    print("")
+    print(f"Input TX  : {len(TX_SIGNATURES)}")
+    print(f"Unique TX : {len(signatures)}")
     print("")
 
-    all_destination_owners = []
+    confirmed_destination_owners = []
+
     ambiguous_transactions = []
     failed_transactions = []
 
-    for number, signature in enumerate(signatures, start=1):
-        print("-" * 74)
-        print(f"[{number}/{len(signatures)}] {signature}")
+    for number, signature in enumerate(
+        signatures,
+        start=1,
+    ):
+        print("-" * 76)
+
+        print(
+            f"[{number}/{len(signatures)}] "
+            f"{signature}"
+        )
 
         try:
             tx = get_transaction(signature)
 
             if not tx:
                 print("⚠️ Transaction bulunamadı.")
+
                 failed_transactions.append(signature)
                 continue
 
             signers = get_signers(tx)
+
+            if signers:
+                print("")
+                print("Signer(s):")
+
+                for signer in signers:
+                    label = known_label(signer)
+
+                    if label:
+                        print(
+                            f"  {signer} [{label}]"
+                        )
+                    else:
+                        print(f"  {signer}")
+
             transfers = extract_transfer_candidates(tx)
 
-            print("Signer(s):")
-            for signer in signers:
-                label = known_label(signer)
-                suffix = f" [{label}]" if label else ""
-                print(f"  {signer}{suffix}")
-
             if not transfers:
-                print("⚠️ Parsed SPL transfer bulunamadı.")
+                print("")
+                print(
+                    "⚠️ Parsed SPL Transfer / "
+                    "TransferChecked bulunamadı."
+                )
+
                 ambiguous_transactions.append(signature)
                 continue
 
             destination_owners_this_tx = []
 
-            for transfer_number, transfer in enumerate(transfers, start=1):
-                owner = transfer["destination_owner"]
-
+            for index, transfer in enumerate(
+                transfers,
+                start=1,
+            ):
                 print("")
-                print(f"Transfer #{transfer_number}")
-                print(f"  Type        : {transfer['type']}")
-                print(f"  Amount      : {transfer['amount']}")
-                print(f"  Mint        : {transfer['mint']}")
+                print(f"Transfer #{index}")
+
+                print(
+                    f"  Type        : "
+                    f"{transfer['type']}"
+                )
+
+                print(
+                    f"  Amount      : "
+                    f"{transfer['amount']}"
+                )
+
+                print(
+                    f"  Mint        : "
+                    f"{transfer['mint'] or '-'}"
+                )
+
                 print(
                     f"  SourceOwner : "
                     f"{transfer['source_owner'] or '-'}"
                 )
+
                 print(
                     f"  DestOwner   : "
-                    f"{owner or '-'}"
+                    f"{transfer['destination_owner'] or '-'}"
                 )
+
                 print(
                     f"  DestToken   : "
                     f"{transfer['destination_token_account'] or '-'}"
                 )
 
-                if owner:
-                    destination_owners_this_tx.append(owner)
+                if transfer["destination_owner"]:
+                    destination_owners_this_tx.append(
+                        transfer["destination_owner"]
+                    )
 
-            destination_owners_this_tx = unique_preserve_order(
-                destination_owners_this_tx
+            destination_owners_this_tx = (
+                unique_preserve_order(
+                    destination_owners_this_tx
+                )
             )
+
+            # -----------------------------------------------
+            # Tek recipient owner -> otomatik güvenli liste
+            # -----------------------------------------------
 
             if len(destination_owners_this_tx) == 1:
                 wallet = destination_owners_this_tx[0]
-                all_destination_owners.append(wallet)
+
+                confirmed_destination_owners.append(wallet)
 
                 label = known_label(wallet)
 
+                print("")
+
                 if label:
-                    print(f"\n✅ Tek recipient owner: {wallet} [{label}]")
+                    print(
+                        f"✅ Tek recipient owner: "
+                        f"{wallet} [{label}]"
+                    )
                 else:
-                    print(f"\n✅ Tek recipient owner: {wallet}")
+                    print(
+                        f"✅ Tek recipient owner: "
+                        f"{wallet}"
+                    )
+
+            # -----------------------------------------------
+            # Bir TX içinde birden fazla recipient
+            # Tahmin yapmıyoruz.
+            # -----------------------------------------------
 
             elif len(destination_owners_this_tx) > 1:
                 print("")
                 print(
-                    "⚠️ Bu TX birden fazla destination owner içeriyor. "
-                    "Otomatik olarak tek Member wallet seçilmedi."
+                    "⚠️ MULTIPLE DESTINATION OWNERS"
+                )
+
+                print(
+                    "Bu TX otomatik olarak tek "
+                    "Round 3 wallet'a atanmadı."
                 )
 
                 for wallet in destination_owners_this_tx:
                     label = known_label(wallet)
-                    suffix = f" [{label}]" if label else ""
-                    print(f"   → {wallet}{suffix}")
+
+                    if label:
+                        print(
+                            f"  → {wallet} [{label}]"
+                        )
+                    else:
+                        print(
+                            f"  → {wallet}"
+                        )
 
                 ambiguous_transactions.append(signature)
 
             else:
                 print("")
-                print("⚠️ Destination owner çözülemedi.")
+                print(
+                    "⚠️ Destination owner çözülemedi."
+                )
+
                 ambiguous_transactions.append(signature)
 
         except Exception as exc:
+            print("")
             print(f"❌ ERROR: {exc}")
+
             failed_transactions.append(signature)
 
-    # ---------------------------------------------------------
-    # FINAL CLEAN LIST
-    # ---------------------------------------------------------
+    # ========================================================
+    # FINAL LIST
+    # ========================================================
 
-    unique_wallets = unique_preserve_order(all_destination_owners)
+    unique_wallets = unique_preserve_order(
+        confirmed_destination_owners
+    )
 
-    # Known wallets first.
     final_entries = []
 
+    # Tim / Faik daima başta
     for label, wallet in KNOWN_WALLETS.items():
-        final_entries.append((label, wallet))
+        final_entries.append(
+            (label, wallet)
+        )
+
+    known_addresses = set(
+        KNOWN_WALLETS.values()
+    )
 
     anonymous_counter = 1
-
-    known_addresses = set(KNOWN_WALLETS.values())
 
     for wallet in unique_wallets:
         if wallet in known_addresses:
             continue
 
-        label = f"Round3-{anonymous_counter:02d}"
+        label = (
+            f"Round3-{anonymous_counter:02d}"
+        )
+
         anonymous_counter += 1
-        final_entries.append((label, wallet))
+
+        final_entries.append(
+            (label, wallet)
+        )
+
+    # ========================================================
+    # OUTPUT
+    # ========================================================
 
     print("")
     print("")
-    print("=" * 74)
-    print("FINAL - AUTO CONFIRMED ROUND 3 WALLET LIST")
-    print("=" * 74)
+    print("=" * 76)
+    print(
+        "FINAL - AUTO CONFIRMED ROUND 3 WALLET LIST"
+    )
+    print("=" * 76)
     print("")
 
     for label, wallet in final_entries:
-        print(f"{label}={wallet}")
-
-    print("")
-    print("=" * 74)
-    print("RAILWAY VALUE")
-    print("=" * 74)
-    print("")
+        print(
+            f"{label}={wallet}"
+        )
 
     railway_value = ",".join(
         f"{label}={wallet}"
         for label, wallet in final_entries
     )
 
-    print("ROUND3_WALLETS=" + railway_value)
+    print("")
+    print("=" * 76)
+    print("RAILWAY VALUE")
+    print("=" * 76)
+    print("")
+
+    print(
+        "ROUND3_WALLETS="
+        + railway_value
+    )
+
+    # ========================================================
+    # MANUAL REVIEW
+    # ========================================================
 
     print("")
-    print("=" * 74)
+    print("")
+    print("=" * 76)
     print("MANUAL REVIEW")
-    print("=" * 74)
+    print("=" * 76)
 
     if ambiguous_transactions:
         print("")
         print(
-            f"⚠️ {len(ambiguous_transactions)} TX otomatik olarak "
-            "tek wallet'a indirgenemedi:"
+            f"⚠️ {len(ambiguous_transactions)} TX "
+            "tek recipient wallet'a "
+            "otomatik indirgenemedi."
         )
 
+        print("")
+
         for signature in ambiguous_transactions:
-            print(f"https://solscan.io/tx/{signature}")
+            print(
+                f"https://solscan.io/tx/{signature}"
+            )
+
     else:
         print("")
-        print("✅ Ambiguous transaction yok.")
+        print(
+            "✅ Manual review gereken TX yok."
+        )
 
     if failed_transactions:
         print("")
-        print(f"❌ {len(failed_transactions)} TX okunamadı:")
+        print(
+            f"❌ {len(failed_transactions)} TX "
+            "RPC üzerinden okunamadı."
+        )
+
+        print("")
 
         for signature in failed_transactions:
             print(signature)
 
     print("")
-    print("BİTTİ.")
+    print("=" * 76)
+    print("BİTTİ")
+    print("=" * 76)
+
     print("")
     print(
-        "NOT: Bu script radarın çalışan V5.2 dosyalarını değiştirmez. "
-        "Sadece Round 3 wallet listesini çıkarmak içindir."
+        "Bu script Patoshi Radar'ın çalışan "
+        "V5.2 sistemini değiştirmedi."
     )
+    print("")
 
 
 if __name__ == "__main__":
