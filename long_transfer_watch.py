@@ -199,7 +199,6 @@ def _finish_token(mint):
         log(f"✅ V5.2 LONG TRANSFER WATCH BİTTİ => {mint} | {elapsed}s")
 
 def _worker():
-    global _running
     while _running:
         try:
             for mint in list(_watch_tokens):
