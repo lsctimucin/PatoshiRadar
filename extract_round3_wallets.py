@@ -9,11 +9,13 @@ import requests
 
 # Railway'deki mevcut Solana/Alchemy RPC URL'ni kullan.
 RPC_URL = (
-    os.getenv("ALCHEMY_RPC_URL")
-    or os.getenv("SOLANA_RPC_URL")
-    or os.getenv("RPC_URL")
-    or ""
-).strip()
+ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY", "").strip()
+
+RPC_URL = (
+    f"https://solana-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}"
+    if ALCHEMY_API_KEY
+    else ""
+)
 
 # Bildiğimiz wallet'lar
 KNOWN_WALLETS = {
