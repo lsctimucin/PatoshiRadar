@@ -1,114 +1,96 @@
+"""Standalone Patoshi hot wallet incoming/outgoing SOL and SPL token watcher."""
+import os
+import json
+import time
+import html
+import logging
+from decimal import Decimal
+from pathlib import Path
+import requests
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+WALLET = os.getenv('HOT_WALLET_ADDRESS', '2qo8jvuc49pFmTjmUHLiARSV6ppPTaE7gw27ZJ6DnNZy').strip()
+BOT = os.getenv('BOT_TOKEN', '').strip()
+CHAT = os.getenv('CHAT_ID', '').strip()
+KEY = os.getenv('ALCHEMY_API_KEY', '').strip()
+RPC = os.getenv('SOLANA_RPC_URL', f'https://solana-mainnet.g.alchemy.com/v2/{KEY}').strip()
+INTERVAL = max(3, int(os.getenv('HOT_WALLET_POLL_SECONDS', '10')))
+STATE = Path(os.getenv('HOT_WALLET_STATE_FILE', '/tmp/patoshi_hot_wallet_state.json'))
+SESSION = requests.Session()
+
+
+def rpc(method, params):
+    response = SESSION.post(RPC, json={'jsonrpc':'2.0','id':1,'method':method,'params':params}, timeout=20)
+    response.raise_for_status()
+    payload = response.json()
+    if payload.get('error'):
+        raise RuntimeError(f'{method}: {payload["error"]}')
+    return payload.get('result')
+
+
+def notify(message):
+    response = SESSION.post(f'https://api.telegram.org/bot{BOT}/sendMessage', json={
+        'chat_id': CHAT, 'text': message, 'parse_mode':'HTML', 'disable_web_page_preview':True
+    }, timeout=15)
+    response.raise_for_status()
+    if not response.json().get('ok'):
+        raise RuntimeError('Telegram did not accept message')
 
 
 def load():
-    try: return json.loads(STATE.read_text())
-    except (OSError,ValueError): return None
+    try:
+        return json.loads(STATE.read_text())
+    except (OSError, ValueError):
+        return None
 
 
 def save(state):
-    tmp=STATE.with_suffix('.tmp')
+    STATE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = STATE.with_suffix('.tmp')
     tmp.write_text(json.dumps(state))
     tmp.replace(STATE)
 
 
-def token_balances(tx, key):
-    meta=tx.get('meta') or {}
-    result={}
-    for side,sign in (('preTokenBalances',-1),('postTokenBalances',1)):
-        for b in meta.get(side) or []:
-            if b.get('owner')!=key: continue
-            mint=b.get('mint')
-            amount=(b.get('uiTokenAmount') or {}).get('amount','0')
-            decimals=int((b.get('uiTokenAmount') or {}).get('decimals',0))
-            if not mint: continue
-            k=(mint,decimals)
-            result[k]=result.get(k,0)+sign*int(amount)
-    return result
-
-
 def changes(tx):
-    if (tx.get('meta') or {}).get('err') is not None: return []
-    msg=(tx.get('transaction') or {}).get('message') or {}
-    keys=[x.get('pubkey') if isinstance(x,dict) else x for x in msg.get('accountKeys') or []]
-    meta=tx.get('meta') or {}
-    result=[]
+    meta = tx.get('meta') or {}
+    if meta.get('err') is not None:
+        return []
+    message = (tx.get('transaction') or {}).get('message') or {}
+    keys = [k.get('pubkey') if isinstance(k,dict) else k for k in message.get('accountKeys') or []]
+    result = []
     if WALLET in keys:
-        idx=keys.index(WALLET)
-        pre=meta.get('preBalances') or []
-        post=meta.get('postBalances') or []
-        if idx<len(pre) and idx<len(post):
-            delta=post[idx]-pre[idx]
-            if delta: result.append(('SOL',Decimal(delta)/Decimal(10**9)))
-    for (mint,decimals),delta in token_balances(tx,WALLET).items():
-        if delta: result.append((mint,Decimal(delta)/(Decimal(10)**decimals)))
+        i = keys.index(WALLET)
+        before, after = meta.get('preBalances') or [], meta.get('postBalances') or []
+        if i < len(before) and i < len(after):
+            delta = after[i] - before[i]
+            if delta:
+                result.append(('SOL', Decimal(delta)/Decimal(10**9)))
+    tokens = {}
+    for field, sign in (('preTokenBalances',-1),('postTokenBalances',1)):
+        for entry in meta.get(field) or []:
+            if entry.get('owner') != WALLET:
+                continue
+            mint = entry.get('mint')
+            amount = entry.get('uiTokenAmount') or {}
+            if not mint:
+                continue
+            decimals = int(amount.get('decimals',0))
+            key = (mint,decimals)
+            tokens[key] = tokens.get(key,0) + sign*int(amount.get('amount','0'))
+    for (mint,decimals), delta in tokens.items():
+        if delta:
+            result.append((mint,Decimal(delta)/(Decimal(10)**decimals)))
     return result
 
 
-def alert(sig, items):
-    lines=['🔥 <b>PATOSHI HOT WALLET — HAREKET</b>','',f'👛 <code>{WALLET}</code>','']
-    for mint,amount in items:
-        direction='🟢 GİRİŞ' if amount>0 else '🔴 ÇIKIŞ'
-        amount_text=format(abs(amount),'f')
-        asset='SOL' if mint=='SOL' else f'<code>{html.escape(mint)}</code>'
-        lines.append(f'{direction}: <b>{amount_text}</b> {asset}')
-    lines += ['',f'🔗 https://solscan.io/tx/{sig}']
+def alert(signature, items):
+    lines = ['🔥 <b>PATOSHI HOT WALLET — HAREKET</b>', '', f'👛 <code>{html.escape(WALLET)}</code>', '']
+    for mint, delta in items:
+        direction = '🟢 GİRİŞ' if delta > 0 else '🔴 ÇIKIŞ'
+        asset = 'SOL' if mint == 'SOL' else f'<code>{html.escape(mint)}</code>'
+        lines.append(f'{direction}: <b>{format(abs(delta),"f")}</b> {asset}')
+    lines.extend(['', f'🔗 https://solscan.io/tx/{signature}'])
     notify('\n'.join(lines))
 
 
-def latest():
-    return rpc('getSignaturesForAddress',[WALLET,{'limit':100,'commitment':'confirmed'}]) or []
-
-
-def run():
-    if not WALLET or not BOT or not CHAT or not RPC or RPC.endswith('/v2/'):
-        raise RuntimeError('HOT_WALLET_ADDRESS, ALCHEMY_API_KEY (or SOLANA_RPC_URL), BOT_TOKEN and CHAT_ID required')
-    state=load()
-    if state is None:
-        rows=latest()
-        state={'cursor':rows[0]['signature'] if rows else None}
-        save(state)
-        logging.info('Initialized at latest signature; no historical spam')
-    notify('🛰️ <b>PATOSHI HOT WALLET WATCH AKTİF</b>\n👛 <code>'+html.escape(WALLET)+'</code>')
-    while True:
-        try:
-            rows=latest()
-            cursor=state.get('cursor')
-            pending=[]
-            for row in rows:
-                if row.get('signature')==cursor: break
-                pending.append(row)
-            if cursor and len(rows)==100 and not any(x.get('signature')==cursor for x in rows):
-                logging.warning('More than 100 new signatures; pagination needed; retaining cursor and retrying')
-                # Backfill the gap using pagination, bounded to avoid runaway credits.
-                before=rows[-1]['signature']
-                for _ in range(20):
-                    extra=rpc('getSignaturesForAddress',[WALLET,{'limit':100,'before':before,'commitment':'confirmed'}]) or []
-                    if not extra: break
-                    found=False
-                    for row in extra:
-                        if row.get('signature')==cursor: found=True; break
-                        pending.append(row)
-                    if found: break
-                    before=extra[-1]['signature']
-                else:
-                    logging.error('Backlog > 2100 signatures, cannot guarantee completeness; retry later')
-                    time.sleep(INTERVAL)
-                    continue
-            for row in reversed(pending):
-                sig=row.get('signature')
-                if not sig: continue
-                tx=rpc('getTransaction',[sig,{'encoding':'jsonParsed','commitment':'confirmed','maxSupportedTransactionVersion':0}])
-                if tx is None:
-                    logging.warning('Transaction not yet available: %s',sig)
-                    break
-                deltas=changes(tx)
-                if deltas: alert(sig,deltas)
-                state['cursor']=sig
-                save(state)
-            time.sleep(INTERVAL)
-        except Exception:
-            logging.exception('Watcher error, retrying')
-            time.sleep(max(10,INTERVAL))
-
-
-if __name__=='__main__': run()
+def signatures(before=None):
